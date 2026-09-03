@@ -82,8 +82,24 @@ struct ContentView: View {
                         .aspectRatio(CGFloat(img.width) / CGFloat(img.height), contentMode: .fit)
                         .background(Color(cgColor: SkeletonRenderer.sketchBackground))
                 } else if state.camera.permissionDenied {
-                    Text("カメラへのアクセスが許可されていません（システム設定 > プライバシーとセキュリティ > カメラ）")
-                        .foregroundStyle(.white).padding()
+                    VStack(spacing: 12) {
+                        Text("カメラへのアクセスが許可されていません")
+                            .font(.title3.weight(.semibold))
+                        Text("システム設定 > プライバシーとセキュリティ > カメラ で MotionLandmarker をオンにし，アプリを起動し直してください．\nオンなのに拒否される場合は，ターミナルで次を実行して許可を初期化してから起動し直します．")
+                            .multilineTextAlignment(.center)
+                        Text("tccutil reset Camera Theta-Akihisa.MotionLandmarker")
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(6)
+                            .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                        Button("システム設定のカメラ項目を開く") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(24)
                 } else {
                     ProgressView().controlSize(.large)
                 }

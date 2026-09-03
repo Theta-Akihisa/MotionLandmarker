@@ -25,15 +25,46 @@ MediaPipe には macOS 向けの Swift SDK が無いため，アプリが `landm
 cd MotionLandmarker
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild -project MotionLandmarker.xcodeproj -scheme MotionLandmarker \
-  -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=- build
+  -configuration Debug -derivedDataPath build build
 open build/Build/Products/Debug/MotionLandmarker.app
 ```
 
-初回起動時の流れ：
+Xcode の自動署名（Apple Development 証明書）でビルドされます．
+`CODE_SIGN_IDENTITY=-`（ad-hoc 署名）は付けないでください．ad-hoc 署名はビルドのたびに
+アプリの識別子が変わるため，一度与えたカメラの許可が次のビルドで効かなくなります（後述）．
 
-1. カメラの使用許可を求められるので許可する
-2. `landmarker/` が `~/Library/Application Support/MotionLandmarker/landmarker/` へ展開され，`uv sync` が走る（数十秒）
+### 初回起動時の流れ
+
+1. カメラの使用許可を求めるダイアログが出るので「許可」を押す
+2. `landmarker/` が `~/Library/Application Support/MotionLandmarker/landmarker/` へ展開され，`uv sync` が走る（数十秒，要ネットワーク）
 3. MediaPipe のモデルが読み込まれ，画面上部の表示が「MediaPipe xx fps」に変われば動作中
+
+### カメラの許可（システム設定での操作）
+
+ダイアログで「許可しない」を押した場合や，映像の代わりに「カメラへのアクセスが許可されていません」と表示される場合は，
+次の手順で許可します．
+
+1. Apple メニュー → **システム設定** を開く
+2. 左の一覧から **プライバシーとセキュリティ** を選ぶ
+3. 右側の **カメラ** をクリックする
+4. 一覧の **MotionLandmarker** のスイッチをオンにする（管理者パスワードを求められることがある）
+5. **アプリをいったん終了して起動し直す**（許可は起動時にしか読み込まれない）
+
+アプリ内の「システム設定のカメラ項目を開く」ボタンを押すと，3 の画面が直接開きます．
+
+#### スイッチがオンなのに拒否される場合
+
+macOS はカメラの許可を「バンドル ID ＋ アプリの署名」の組で記録します．
+署名が変わったアプリ（ad-hoc 署名で再ビルドしたもの，別の Mac でビルドしたもの，
+GitHub Releases からダウンロードした版を更新したもの）は，設定画面ではオンに見えても
+別のアプリとして扱われ，拒否されます．この場合はターミナルで許可の記録を消してから起動し直します．
+
+```bash
+tccutil reset Camera Theta-Akihisa.MotionLandmarker
+open /Applications/MotionLandmarker.app   # 起動し直すとダイアログが再度出る
+```
+
+Xcode の自動署名でビルドしている限り，署名は安定しているのでこの操作は不要です．
 
 `landmarker.py` / `pyproject.toml` / `uv.lock` を変更すると，次回起動時に展開先が自動で更新されます．
 

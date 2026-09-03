@@ -34,3 +34,7 @@ jobs:
             3. ad-hoc 署名のため初回は Gatekeeper に止められる．右クリック →「開く」，
                または `xattr -dr com.apple.quarantine /Applications/MotionLandmarker.app` を実行する
             4. 初回起動時に Python 依存関係の取得と MediaPipe モデルのダウンロードが走る（要ネットワーク）
+            5. カメラの許可ダイアログで「許可」を押す．拒否してしまった場合は
+               システム設定 > プライバシーとセキュリティ > カメラ で MotionLandmarker をオンにして起動し直す
+            6. 以前の版から更新した場合，署名が変わるためカメラが拒否されることがある．
+               `tccutil reset Camera Theta-Akihisa.MotionLandmarker` を実行して起動し直す

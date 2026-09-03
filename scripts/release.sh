@@ -10,7 +10,12 @@ DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
-VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' MotionLandmarker.xcodeproj/project.pbxproj | head -1)
+# 版数：CI ではタグ名（v0.1.0 → 0.1.0），ローカルでは Xcode の MARKETING_VERSION
+if [ -n "${GITHUB_REF_NAME:-}" ]; then
+  VERSION=${GITHUB_REF_NAME#v}
+else
+  VERSION=$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' MotionLandmarker.xcodeproj/project.pbxproj | head -1)
+fi
 APP=build/Build/Products/Release/MotionLandmarker.app
 OUT=dist/MotionLandmarker-${VERSION}.zip
 
