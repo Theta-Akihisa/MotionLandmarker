@@ -30,9 +30,15 @@ if [ -e "$APP/Contents/Resources/landmarker/.venv" ]; then
   echo "error: .venv is bundled" >&2; exit 1
 fi
 
-# 署名し直す（バンドル全体，ハードンドランタイム）
-codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP"
-codesign --verify --deep --strict "$APP"
+# 署名し直す。エンタイトルメント（カメラ利用の権利）を必ず付ける。
+# Hardened Runtime 有効のアプリはこれが無いとカメラ要求が無言で拒否され，
+# システム設定のカメラ一覧にも現れない。
+codesign --force --options runtime \
+  --entitlements MotionLandmarker/MotionLandmarker.entitlements \
+  --sign "$SIGN_IDENTITY" "$APP"
+codesign --verify --strict "$APP"
+codesign -d --entitlements - "$APP" 2>/dev/null | grep -q "com.apple.security.device.camera" \
+  || { echo "error: camera entitlement missing" >&2; exit 1; }
 
 mkdir -p dist
 rm -f "$OUT"
