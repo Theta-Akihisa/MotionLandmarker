@@ -1,0 +1,36 @@
+# v1.2.3 のようなタグを push すると，Release 構成でビルドした .app を zip にして
+# GitHub Releases に添付する。署名は ad-hoc（Developer ID 署名は行わない）。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # デプロイメントターゲットが macOS 26 のため，Xcode 26 を持つランナーが必要
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app && xcodebuild -version
+
+      - name: Build and package
+        run: DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/release.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true
+          body: |
+            ## インストール
+            1. zip を展開し，`MotionLandmarker.app` を `/Applications` などへ置く
+            2. 実行には [uv](https://docs.astral.sh/uv/) が必要（`curl -LsSf https://astral.sh/uv/install.sh | sh`）
+            3. ad-hoc 署名のため初回は Gatekeeper に止められる．右クリック →「開く」，
+               または `xattr -dr com.apple.quarantine /Applications/MotionLandmarker.app` を実行する
+            4. 初回起動時に Python 依存関係の取得と MediaPipe モデルのダウンロードが走る（要ネットワーク）

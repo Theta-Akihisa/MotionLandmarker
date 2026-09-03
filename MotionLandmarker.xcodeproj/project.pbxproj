@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		6A2814532FD501DC004FCED3 /* SensorGlove_Monitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SensorGlove_Monitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A2814532FD501DC004FCED3 /* MotionLandmarker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MotionLandmarker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		6A2814552FD501DC004FCED3 /* SensorGlove_Monitor */ = {
+		6A2814552FD501DC004FCED3 /* MotionLandmarker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = SensorGlove_Monitor;
+			path = MotionLandmarker;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		6A28144A2FD501DC004FCED3 = {
 			isa = PBXGroup;
 			children = (
-				6A2814552FD501DC004FCED3 /* SensorGlove_Monitor */,
+				6A2814552FD501DC004FCED3 /* MotionLandmarker */,
 				6A2814542FD501DC004FCED3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		6A2814542FD501DC004FCED3 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				6A2814532FD501DC004FCED3 /* SensorGlove_Monitor.app */,
+				6A2814532FD501DC004FCED3 /* MotionLandmarker.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,26 +48,27 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		6A2814522FD501DC004FCED3 /* SensorGlove_Monitor */ = {
+		6A2814522FD501DC004FCED3 /* MotionLandmarker */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 6A28145E2FD501DD004FCED3 /* Build configuration list for PBXNativeTarget "SensorGlove_Monitor" */;
+			buildConfigurationList = 6A28145E2FD501DD004FCED3 /* Build configuration list for PBXNativeTarget "MotionLandmarker" */;
 			buildPhases = (
 				6A28144F2FD501DC004FCED3 /* Sources */,
 				6A2814502FD501DC004FCED3 /* Frameworks */,
 				6A2814512FD501DC004FCED3 /* Resources */,
+				6A2814702FD501DC004FCED3 /* Copy Landmarker Sidecar */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				6A2814552FD501DC004FCED3 /* SensorGlove_Monitor */,
+				6A2814552FD501DC004FCED3 /* MotionLandmarker */,
 			);
-			name = SensorGlove_Monitor;
+			name = MotionLandmarker;
 			packageProductDependencies = (
 			);
-			productName = SensorGlove_Monitor;
-			productReference = 6A2814532FD501DC004FCED3 /* SensorGlove_Monitor.app */;
+			productName = MotionLandmarker;
+			productReference = 6A2814532FD501DC004FCED3 /* MotionLandmarker.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +86,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 6A28144E2FD501DC004FCED3 /* Build configuration list for PBXProject "SensorGlove_Monitor" */;
+			buildConfigurationList = 6A28144E2FD501DC004FCED3 /* Build configuration list for PBXProject "MotionLandmarker" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +100,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				6A2814522FD501DC004FCED3 /* SensorGlove_Monitor */,
+				6A2814522FD501DC004FCED3 /* MotionLandmarker */,
 			);
 		};
 /* End PBXProject section */
@@ -113,6 +114,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		6A2814702FD501DC004FCED3 /* Copy Landmarker Sidecar */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Landmarker Sidecar";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nDEST=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/landmarker\"\nmkdir -p \"$DEST\"\nrsync -a --delete --exclude .venv --exclude __pycache__ \"$SRCROOT/landmarker/\" \"$DEST/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		6A28144F2FD501DC004FCED3 /* Sources */ = {
@@ -163,7 +186,7 @@
 				DEVELOPMENT_TEAM = RJFN7P9N2M;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -227,7 +250,7 @@
 				DEVELOPMENT_TEAM = RJFN7P9N2M;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -254,18 +277,31 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RJFN7P9N2M;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = YES;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MotionLandmarker-Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "プレビュー表示と録画に使います";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "録画に使います";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Theta-Akihisa.SensorGlove-Monitor";
+				PRODUCT_BUNDLE_IDENTIFIER = "Theta-Akihisa.MotionLandmarker";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -286,18 +322,31 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = RJFN7P9N2M;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = YES;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = YES;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MotionLandmarker-Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "プレビュー表示と録画に使います";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "録画に使います";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Theta-Akihisa.SensorGlove-Monitor";
+				PRODUCT_BUNDLE_IDENTIFIER = "Theta-Akihisa.MotionLandmarker";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -312,7 +361,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		6A28144E2FD501DC004FCED3 /* Build configuration list for PBXProject "SensorGlove_Monitor" */ = {
+		6A28144E2FD501DC004FCED3 /* Build configuration list for PBXProject "MotionLandmarker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6A28145C2FD501DD004FCED3 /* Debug */,
@@ -321,7 +370,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6A28145E2FD501DD004FCED3 /* Build configuration list for PBXNativeTarget "SensorGlove_Monitor" */ = {
+		6A28145E2FD501DD004FCED3 /* Build configuration list for PBXNativeTarget "MotionLandmarker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				6A28145F2FD501DD004FCED3 /* Debug */,

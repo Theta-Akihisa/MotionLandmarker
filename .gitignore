@@ -1,0 +1,6 @@
+build/
+dist/
+landmarker/.venv/
+landmarker/__pycache__/
+landmarker/models/
+.DS_Store
