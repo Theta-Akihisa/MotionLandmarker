@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var draggingHeight: Double?
     @State private var dragStartHeight: Double?
     private let videoHeightRange: ClosedRange<Double> = 160...1080
+    /// グラフのプロット領域の中央 x（グラフ内のローカル座標）。現在位置の縦線に使う
+    @State private var plotCenterX: CGFloat = 0
     private var videoHeight: Double { draggingHeight ?? savedVideoHeight }
 
     var body: some View {
@@ -323,21 +325,24 @@ struct ContentView: View {
                         }
                     }
                     .padding(.vertical, 12)
-                    // 現在位置（再生中は再生位置）を示す縦線。横軸の終端は常に右端なので，
-                    // 全グラフを縦に貫く 1 本の線をプロット領域の右端に重ねる
-                    .overlay(alignment: .trailing) {
-                        VStack(spacing: 0) {
-                            Text(state.playbackURL != nil ? "再生位置" : "現在")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.red, in: Capsule())
-                            Rectangle().fill(Color.red).frame(width: 2)
+                    .onPreferenceChange(PlotCenterXKey.self) { plotCenterX = $0 }
+                    // 現在位置（再生中は再生位置）を示す縦線。横軸は現在位置が中央になるよう取っているので，
+                    // 全グラフを縦に貫く 1 本の線をプロット領域の中央に重ねる
+                    .overlay(alignment: .topLeading) {
+                        if plotCenterX > 0 {
+                            VStack(spacing: 0) {
+                                Text(state.playbackURL != nil ? "再生位置" : "現在")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.red, in: Capsule())
+                                Rectangle().fill(Color.red).frame(width: 2)
+                            }
+                            .padding(.vertical, 4)
+                            // グラフ内ローカル座標 → この VStack の座標：外側の余白 16 + カード内の余白 12
+                            .alignmentGuide(.leading) { d in d[HorizontalAlignment.center] - (16 + 12 + plotCenterX) }
+                            .allowsHitTesting(false)
                         }
-                        .padding(.vertical, 4)
-                        // 外側の余白 16 + カード内の余白 12 = プロット領域の右端
-                        .padding(.trailing, 16 + 12 - 1)
-                        .allowsHitTesting(false)
                     }
                 }
             }

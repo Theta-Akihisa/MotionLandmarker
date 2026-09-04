@@ -135,11 +135,16 @@ struct MultiSeriesGraphView: View {
     private var stride: Int { max(1, count / maxPoints) }
     private var useTimeAxis: Bool { endTime != nil || (times.map { $0.count == count && !$0.isEmpty } ?? false) }
     private var lastTime: Date { endTime ?? times?.last ?? Date() }
+    /// 現在位置を中央に置き，前後に windowSeconds / 2 ずつ表示する
     private var timeDomain: ClosedRange<Date> {
-        lastTime.addingTimeInterval(-windowSeconds)...lastTime
+        lastTime.addingTimeInterval(-windowSeconds / 2)...lastTime.addingTimeInterval(windowSeconds / 2)
     }
 
     private func clamp(_ v: Float) -> Float { min(max(v, range.lowerBound), range.upperBound) }
+
+    static func format(_ v: Float) -> String {
+        v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -179,18 +184,38 @@ struct MultiSeriesGraphView: View {
             .chartPlotStyle { $0.clipped() }
             .chartYAxis {
                 AxisMarks(position: .leading,
-                          values: [range.lowerBound, (range.lowerBound + range.upperBound) / 2, range.upperBound]) {
+                          values: [range.lowerBound, (range.lowerBound + range.upperBound) / 2, range.upperBound]) { v in
                     AxisGridLine()
-                    AxisValueLabel(anchor: .trailing).font(.body)
+                    AxisValueLabel(anchor: .trailing) {
+                        Text(Self.format(v.as(Float.self) ?? 0))
+                            .font(.body)
+                            .frame(width: 48, alignment: .trailing)
+                    }
                 }
             }
             .chartXScale(domain: useTimeAxis ? timeDomain : Date()...Date())
             .chartXAxis(.hidden)
             .chartLegend(.hidden)
+            // プロット領域の中央 x を親に伝える（全グラフを貫く現在位置の線を引くため）
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Color.clear.preference(key: PlotCenterXKey.self,
+                                           value: proxy.plotFrame.map { geo[$0].midX } ?? 0)
+                }
+            }
             .frame(height: 150)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// グラフのプロット領域の中央 x（各グラフのローカル座標）。全グラフで縦軸ラベル幅を固定しているので同じ値になる
+struct PlotCenterXKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let n = nextValue()
+        if n > 0 { value = n }
     }
 }

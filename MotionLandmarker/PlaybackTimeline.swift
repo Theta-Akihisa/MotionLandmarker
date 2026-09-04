@@ -105,13 +105,15 @@ nonisolated struct PlaybackTimeline: Sendable {
             .map { $0.split(separator: ",", omittingEmptySubsequences: false) }
     }
 
-    /// 再生位置（動画の秒）までの直近 `window` 秒分を，グラフに渡す形で返す
+    /// 再生位置（動画の秒）の前後 `window / 2` 秒分を，グラフに渡す形で返す（再生位置が中央）
     func slice(atVideoTime seconds: Double, window: TimeInterval) -> (times: [Date], series: [MetricKind: [Float?]]) {
         let nowMs = firstTimestamp + Int(seconds * 1000)
-        let fromMs = nowMs - Int(window * 1000)
+        let half = Int(window * 500)
+        let fromMs = nowMs - half
+        let toMs = nowMs + half
         // timestamps は単調増加
         let lo = timestamps.firstIndex { $0 >= fromMs } ?? timestamps.count
-        let hi = timestamps.firstIndex { $0 > nowMs } ?? timestamps.count
+        let hi = timestamps.firstIndex { $0 > toMs } ?? timestamps.count
         guard lo < hi else { return ([], [:]) }
         let times = timestamps[lo..<hi].map { Date(timeIntervalSince1970: Double($0) / 1000) }
         var series: [MetricKind: [Float?]] = [:]
