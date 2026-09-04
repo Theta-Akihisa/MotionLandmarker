@@ -19,8 +19,13 @@ final class AppState {
     var drawOptions = DrawOptions() {
         didSet { pipeline?.setDrawOptions(drawOptions) }
     }
-    var visibleGroups: Set<MetricGroup> = Set(MetricGroup.allCases)
-    var visibleMetrics: Set<MetricKind> = Set(MetricKind.allCases)
+    /// 波形の表示モード（上半身 / 手腕）。次回起動時も保持する。
+    var metricMode: MetricMode = MetricMode(rawValue: UserDefaults.standard.string(forKey: "metricMode") ?? "") ?? .upperBody {
+        didSet { UserDefaults.standard.set(metricMode.rawValue, forKey: "metricMode") }
+    }
+    /// 非表示にしたグラフと系列（モードをまたいで保持する）
+    var hiddenCharts: Set<String> = []
+    var hiddenMetrics: Set<MetricKind> = []
     var displayImage: CGImage?
     /// 10 秒分の表示に十分な長さ（60 fps でも 600 サンプル = 10 秒）
     var history = MetricHistory(capacity: 600)

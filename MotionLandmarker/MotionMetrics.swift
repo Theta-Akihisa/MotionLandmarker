@@ -8,24 +8,24 @@
 
 import Foundation
 
-nonisolated enum MetricGroup: String, CaseIterable, Identifiable, Sendable {
-    case face, body, leftArm, rightArm
+/// 波形の表示モード。切り替えボタンで選ぶ。
+nonisolated enum MetricMode: String, CaseIterable, Identifiable, Sendable {
+    case upperBody, arm
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .face: return "頭の向き"
-        case .body: return "体の向き"
-        case .leftArm: return "左手腕"
-        case .rightArm: return "右手腕"
+        case .upperBody: return "上半身"
+        case .arm: return "手腕"
         }
     }
-    var kinds: [MetricKind] { MetricKind.allCases.filter { $0.group == self } }
+    var charts: [MetricChart] { MetricChart.all.filter { $0.mode == self } }
 }
 
 /// 1 枚のグラフに重ねて描く系列のまとまり。縦軸の範囲が同じ項目だけをまとめる。
 nonisolated struct MetricChart: Identifiable, Sendable {
     let id: String
     let title: String
+    let mode: MetricMode
     let kinds: [MetricKind]
     var unit: String { kinds.first?.unit ?? "" }
     /// 重ねる系列の範囲をすべて含む範囲（縦軸は 1 枚につき 1 つ）
@@ -37,11 +37,17 @@ nonisolated struct MetricChart: Identifiable, Sendable {
     }
 
     static let all: [MetricChart] = [
-        MetricChart(id: "head", title: "頭の向き [deg]", kinds: [.faceYaw, .facePitch, .faceRoll]),
-        MetricChart(id: "body", title: "体の向き [deg]", kinds: [.bodyYaw, .bodyRoll]),
-        MetricChart(id: "wristX", title: "手首 x", kinds: [.leftWristX, .rightWristX]),
-        MetricChart(id: "wristY", title: "手首 y", kinds: [.leftWristY, .rightWristY]),
-        MetricChart(id: "wristSpeed", title: "手首 速度 [/s]", kinds: [.leftWristSpeed, .rightWristSpeed]),
+        // 上半身
+        MetricChart(id: "head", title: "頭の向き [deg]", mode: .upperBody, kinds: [.faceYaw, .facePitch, .faceRoll]),
+        MetricChart(id: "body", title: "体の向き [deg]", mode: .upperBody, kinds: [.bodyYaw, .bodyRoll]),
+        MetricChart(id: "wristX", title: "手首 x", mode: .upperBody, kinds: [.leftWristX, .rightWristX]),
+        MetricChart(id: "wristY", title: "手首 y", mode: .upperBody, kinds: [.leftWristY, .rightWristY]),
+        MetricChart(id: "wristSpeed", title: "手首 速度 [/s]", mode: .upperBody, kinds: [.leftWristSpeed, .rightWristSpeed]),
+        // 手腕（肘から手まで）
+        MetricChart(id: "forearm", title: "前腕の角度 [deg]", mode: .arm, kinds: [.leftForearmAngle, .rightForearmAngle]),
+        MetricChart(id: "handDir", title: "手の向き [deg]", mode: .arm, kinds: [.leftHandDirection, .rightHandDirection]),
+        MetricChart(id: "handOpen", title: "手の開き", mode: .arm, kinds: [.leftHandOpenness, .rightHandOpenness]),
+        MetricChart(id: "armWristSpeed", title: "手首 速度 [/s]", mode: .arm, kinds: [.leftWristSpeed, .rightWristSpeed]),
     ]
 }
 
@@ -50,15 +56,25 @@ nonisolated enum MetricKind: String, CaseIterable, Identifiable, Sendable {
     case bodyYaw, bodyRoll
     case leftWristX, leftWristY, leftWristSpeed
     case rightWristX, rightWristY, rightWristSpeed
+    // 手腕モード（肘から手まで）
+    case leftForearmAngle, rightForearmAngle
+    case leftHandDirection, rightHandDirection
+    case leftHandOpenness, rightHandOpenness
 
     var id: String { rawValue }
 
-    var group: MetricGroup {
+    var isLeft: Bool {
         switch self {
-        case .faceYaw, .facePitch, .faceRoll: return .face
-        case .bodyYaw, .bodyRoll: return .body
-        case .leftWristX, .leftWristY, .leftWristSpeed: return .leftArm
-        case .rightWristX, .rightWristY, .rightWristSpeed: return .rightArm
+        case .leftWristX, .leftWristY, .leftWristSpeed, .leftForearmAngle, .leftHandDirection, .leftHandOpenness:
+            return true
+        default: return false
+        }
+    }
+    var isRight: Bool {
+        switch self {
+        case .rightWristX, .rightWristY, .rightWristSpeed, .rightForearmAngle, .rightHandDirection, .rightHandOpenness:
+            return true
+        default: return false
         }
     }
 
@@ -75,6 +91,12 @@ nonisolated enum MetricKind: String, CaseIterable, Identifiable, Sendable {
         case .rightWristX: return "右 手首 x"
         case .rightWristY: return "右 手首 y"
         case .rightWristSpeed: return "右 手首 速度"
+        case .leftForearmAngle: return "左 前腕"
+        case .rightForearmAngle: return "右 前腕"
+        case .leftHandDirection: return "左 手"
+        case .rightHandDirection: return "右 手"
+        case .leftHandOpenness: return "左 手"
+        case .rightHandOpenness: return "右 手"
         }
     }
 
@@ -84,6 +106,8 @@ nonisolated enum MetricKind: String, CaseIterable, Identifiable, Sendable {
         case .faceYaw, .facePitch, .faceRoll, .bodyYaw, .bodyRoll: return -90...90
         case .leftWristX, .leftWristY, .rightWristX, .rightWristY: return 0...1
         case .leftWristSpeed, .rightWristSpeed: return 0...5
+        case .leftForearmAngle, .rightForearmAngle, .leftHandDirection, .rightHandDirection: return -180...180
+        case .leftHandOpenness, .rightHandOpenness: return 0...3
         }
     }
 
@@ -92,6 +116,8 @@ nonisolated enum MetricKind: String, CaseIterable, Identifiable, Sendable {
         case .faceYaw, .facePitch, .faceRoll, .bodyYaw, .bodyRoll: return "deg"
         case .leftWristSpeed, .rightWristSpeed: return "/s"
         case .leftWristX, .leftWristY, .rightWristX, .rightWristY: return ""
+        case .leftForearmAngle, .rightForearmAngle, .leftHandDirection, .rightHandDirection: return "deg"
+        case .leftHandOpenness, .rightHandOpenness: return ""
         }
     }
 }
@@ -125,9 +151,13 @@ nonisolated enum MotionMetrics {
             v[.bodyRoll] = deg(atan2(ls.y - rs.y, ls.x - rs.x))
         }
 
-        let sides: [(hand: [Landmark], prev: [Landmark]?, x: MetricKind, y: MetricKind, speed: MetricKind)] = [
-            (frame.leftHand, previous?.leftHand, .leftWristX, .leftWristY, .leftWristSpeed),
-            (frame.rightHand, previous?.rightHand, .rightWristX, .rightWristY, .rightWristSpeed),
+        let sides: [(hand: [Landmark], prev: [Landmark]?, elbow: Int,
+                     x: MetricKind, y: MetricKind, speed: MetricKind,
+                     forearm: MetricKind, direction: MetricKind, openness: MetricKind)] = [
+            (frame.leftHand, previous?.leftHand, LandmarkTopology.poseElbow.left,
+             .leftWristX, .leftWristY, .leftWristSpeed, .leftForearmAngle, .leftHandDirection, .leftHandOpenness),
+            (frame.rightHand, previous?.rightHand, LandmarkTopology.poseElbow.right,
+             .rightWristX, .rightWristY, .rightWristSpeed, .rightForearmAngle, .rightHandDirection, .rightHandOpenness),
         ]
         for s in sides where s.hand.count == LandmarkFrame.handCount {
             let wrist = s.hand[0]
@@ -137,6 +167,23 @@ nonisolated enum MotionMetrics {
                let previous, frame.timestampMs > previous.timestampMs {
                 let dt = Double(frame.timestampMs - previous.timestampMs) / 1000
                 v[s.speed] = hypot(wrist.x - prev[0].x, wrist.y - prev[0].y) / dt
+            }
+
+            // 前腕の角度：pose の肘 → hand の手首 の向き（画面上，右向き 0，上向き +90）
+            if frame.pose.count == LandmarkFrame.poseCount {
+                let elbow = frame.pose[s.elbow]
+                if elbow.visibility > 0.5 {
+                    v[s.forearm] = deg(atan2(-(wrist.y - elbow.y), wrist.x - elbow.x))
+                }
+            }
+            // 手の向き：手首（0）→ 中指の付け根（9）の向き（右向き 0，上向き +90）
+            let mcp = s.hand[9]
+            v[s.direction] = deg(atan2(-(mcp.y - wrist.y), mcp.x - wrist.x))
+            // 手の開き：各指先（4, 8, 12, 16, 20）から手首までの距離の平均を，手のひらの長さ（0→9）で割った値
+            let palm = hypot(mcp.x - wrist.x, mcp.y - wrist.y)
+            if palm > 1e-6 {
+                let tips = [4, 8, 12, 16, 20].map { hypot(s.hand[$0].x - wrist.x, s.hand[$0].y - wrist.y) }
+                v[s.openness] = tips.reduce(0, +) / Double(tips.count) / palm
             }
         }
         return v

@@ -203,45 +203,74 @@ struct ContentView: View {
 
     // MARK: - 波形グラフ
     private var graphSection: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("グラフ項目").font(.title2.weight(.semibold)).padding(.bottom, 4)
-                    ForEach(MetricGroup.allCases) { g in
-                        Toggle(g.label, isOn: groupBinding(g)).font(.title3.weight(.semibold))
-                        ForEach(g.kinds) { k in
-                            Toggle(k.label, isOn: metricBinding(k)).font(.title3).padding(.leading, 18)
-                        }
-                    }
+        VStack(spacing: 0) {
+            HStack {
+                Picker("表示モード", selection: $state.metricMode) {
+                    ForEach(MetricMode.allCases) { m in Text(m.label).tag(m) }
                 }
-                .toggleStyle(.checkbox)
-                .padding(12)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 260)
+                .font(.title3)
+                Text(state.metricMode == .upperBody
+                     ? "頭・体の向きと手首の位置・速度"
+                     : "肘から手までの動き（前腕の角度・手の向き・手の開き・手首の速度）")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
             }
-            .frame(width: 270)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(MetricChart.all) { chart in
-                        let kinds = chart.kinds.filter { isVisible($0) }
-                        if !kinds.isEmpty {
-                            MultiSeriesGraphView(
-                                title: chart.title,
-                                series: kinds.map { k in
-                                    MultiSeriesGraphView.Series(id: k.rawValue, label: k.label,
-                                                                data: state.history[k], color: color(for: k))
-                                },
-                                unit: chart.unit, range: chart.yRange, times: state.history.times)
-                            .padding(.horizontal)
+            HStack(alignment: .top, spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("グラフ項目").font(.title2.weight(.semibold)).padding(.bottom, 4)
+                        ForEach(state.metricMode.charts) { chart in
+                            Toggle(chart.title, isOn: chartBinding(chart)).font(.title3.weight(.semibold))
+                            ForEach(chart.kinds) { k in
+                                Toggle(k.label, isOn: metricBinding(k)).font(.title3).padding(.leading, 18)
+                            }
                         }
                     }
+                    .toggleStyle(.checkbox)
+                    .padding(12)
                 }
-                .padding(.vertical, 12)
+                .frame(width: 270)
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(state.metricMode.charts) { chart in
+                            let kinds = chart.kinds.filter { isVisible($0, in: chart) }
+                            if !kinds.isEmpty {
+                                MultiSeriesGraphView(
+                                    title: chart.title,
+                                    series: kinds.map { k in
+                                        MultiSeriesGraphView.Series(id: k.rawValue, label: k.label,
+                                                                    data: state.history[k], color: color(for: k))
+                                    },
+                                    unit: chart.unit, range: chart.yRange, times: state.history.times)
+                                .padding(.horizontal)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 12)
+                }
             }
         }
     }
 
-    private func isVisible(_ k: MetricKind) -> Bool {
-        state.visibleGroups.contains(k.group) && state.visibleMetrics.contains(k)
+    private func isVisible(_ k: MetricKind, in chart: MetricChart) -> Bool {
+        !state.hiddenCharts.contains(chart.id) && !state.hiddenMetrics.contains(k)
+    }
+
+    private func chartBinding(_ chart: MetricChart) -> Binding<Bool> {
+        Binding(get: { !state.hiddenCharts.contains(chart.id) },
+                set: { on in if on { state.hiddenCharts.remove(chart.id) } else { state.hiddenCharts.insert(chart.id) } })
+    }
+
+    private func metricBinding(_ k: MetricKind) -> Binding<Bool> {
+        Binding(get: { !state.hiddenMetrics.contains(k) },
+                set: { on in if on { state.hiddenMetrics.remove(k) } else { state.hiddenMetrics.insert(k) } })
     }
 
     /// 映像のランドマークと同じパレットから取る（Palette 参照）
@@ -252,20 +281,12 @@ struct ContentView: View {
         case .faceRoll: return Color(cgColor: Palette.faceAlt2)
         case .bodyYaw: return Color(cgColor: Palette.body)
         case .bodyRoll: return Color(cgColor: Palette.bodyAlt)
-        case .leftWristX, .leftWristY, .leftWristSpeed: return Color(cgColor: Palette.leftHand)
-        case .rightWristX, .rightWristY, .rightWristSpeed: return Color(cgColor: Palette.rightHand)
+        default:
+            if k.isLeft { return Color(cgColor: Palette.leftHand) }
+            return Color(cgColor: Palette.rightHand)
         }
     }
 
-    private func groupBinding(_ g: MetricGroup) -> Binding<Bool> {
-        Binding(get: { state.visibleGroups.contains(g) },
-                set: { on in if on { state.visibleGroups.insert(g) } else { state.visibleGroups.remove(g) } })
-    }
-
-    private func metricBinding(_ k: MetricKind) -> Binding<Bool> {
-        Binding(get: { state.visibleMetrics.contains(k) },
-                set: { on in if on { state.visibleMetrics.insert(k) } else { state.visibleMetrics.remove(k) } })
-    }
 }
 
 // MARK: - Helper views
