@@ -157,6 +157,11 @@ struct MultiSeriesGraphView: View {
             }
 
             Chart {
+                if useTimeAxis {
+                    RuleMark(x: .value("Now", lastTime)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
+                } else if count > 0 {
+                    RuleMark(x: .value("Now", count - 1)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
+                }
                 ForEach(series) { s in
                     ForEach(s.segments(stride: stride), id: \.run) { seg in
                         ForEach(seg.points, id: \.index) { pt in
