@@ -29,8 +29,13 @@ final class AppState {
     var hiddenCharts: Set<String> = []
     var hiddenMetrics: Set<MetricKind> = []
     var displayImage: CGImage?
-    /// 10 秒分の表示に十分な長さ（60 fps でも 600 サンプル = 10 秒）
+    /// グラフに渡す履歴。推論フレームごとではなく一定間隔（chartRefreshInterval）で更新して描画負荷を抑える
     var history = MetricHistory(capacity: 600)
+    /// 推論フレームごとに更新する履歴（監視対象外）。10 秒分の表示に十分な長さ
+    @ObservationIgnored private var liveHistory = MetricHistory(capacity: 600)
+    @ObservationIgnored private var historyDirty = false
+    @ObservationIgnored private var chartTimer: Timer?
+    static let chartRefreshInterval: TimeInterval = 1.0 / 15
     var inferenceFPS: Double = 0
     var isRecording = false
     var recordedFrames = 0
@@ -203,11 +208,23 @@ final class AppState {
     private func receive(image: CGImage?, metrics: [MetricKind: Double], recorded: Int) {
         displayImage = image
         recordedFrames = recorded
-        history.push(metrics)
+        liveHistory.push(metrics)
+        historyDirty = true
+        if chartTimer == nil {
+            chartTimer = Timer.scheduledTimer(withTimeInterval: Self.chartRefreshInterval, repeats: true) { _ in
+                Task { @MainActor in self.flushHistory() }
+            }
+        }
         let now = Date().timeIntervalSince1970
         fpsWindow.append(now)
         fpsWindow.removeAll { $0 < now - 2 }
         inferenceFPS = Double(fpsWindow.count) / 2
+    }
+
+    private func flushHistory() {
+        guard historyDirty else { return }
+        historyDirty = false
+        history = liveHistory
     }
 
     // MARK: - 録画

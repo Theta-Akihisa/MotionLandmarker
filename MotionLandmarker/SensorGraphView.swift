@@ -157,10 +157,11 @@ struct MultiSeriesGraphView: View {
             }
 
             Chart {
+                // 現在位置（再生中は再生位置）
                 if useTimeAxis {
-                    RuleMark(x: .value("Now", lastTime)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
+                    RuleMark(x: .value("Now", lastTime)).foregroundStyle(Color.red).lineStyle(StrokeStyle(lineWidth: 2.5))
                 } else if count > 0 {
-                    RuleMark(x: .value("Now", count - 1)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
+                    RuleMark(x: .value("Now", count - 1)).foregroundStyle(Color.red).lineStyle(StrokeStyle(lineWidth: 2.5))
                 }
                 ForEach(series) { s in
                     ForEach(s.segments(stride: stride), id: \.run) { seg in
@@ -169,12 +170,12 @@ struct MultiSeriesGraphView: View {
                                 LineMark(x: .value("Time", times[pt.index]), y: .value("Value", clamp(pt.value)),
                                          series: .value("Series", "\(s.id)-\(seg.run)"))
                                     .foregroundStyle(s.color)
-                                    .interpolationMethod(.catmullRom)
+                                    .interpolationMethod(.linear)
                             } else {
                                 LineMark(x: .value("Sample", pt.index), y: .value("Value", clamp(pt.value)),
                                          series: .value("Series", "\(s.id)-\(seg.run)"))
                                     .foregroundStyle(s.color)
-                                    .interpolationMethod(.catmullRom)
+                                    .interpolationMethod(.linear)
                             }
                         }
                     }
