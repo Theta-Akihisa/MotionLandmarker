@@ -304,7 +304,7 @@ struct ContentView: View {
                         ? state.playbackTimeline?.slice(atVideoTime: state.playbackSeconds, window: 10) : nil
                     let times = playback?.times ?? state.history.times
                     let endTime = state.playbackTimeline.map { $0.date(atVideoTime: state.playbackSeconds) }
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
                         ForEach(state.metricMode.charts) { chart in
                             let kinds = chart.kinds.filter { isVisible($0, in: chart) }
                             if !kinds.isEmpty {
