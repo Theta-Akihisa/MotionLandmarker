@@ -42,18 +42,26 @@ def norm(lms, with_vis: bool):
     return [[l.x, l.y, l.z] for l in lms]
 
 
-def main() -> None:
+def create_landmarker():
     options = vision.HolisticLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=model_path()),
         running_mode=vision.RunningMode.VIDEO,
     )
-    landmarker = vision.HolisticLandmarker.create_from_options(options)
+    return vision.HolisticLandmarker.create_from_options(options)
+
+
+def main() -> None:
+    landmarker = create_landmarker()
     out = sys.stdout
     stdin = sys.stdin.buffer
     out.write(json.dumps({"ready": True}) + "\n")
     out.flush()
 
     last_ts = -1
+    # VIDEO モードは前フレームの状態（セグメンテーションの平滑化など）を持ち越すため，
+    # 入力画像のサイズが変わると RET_CHECK で落ちる（例：カメラ 640x360 → 動画 640x426）．
+    # サイズが変わったら Landmarker を作り直す．
+    last_shape = None
     while True:
         header = stdin.read(12)
         if len(header) < 12:
@@ -68,6 +76,12 @@ def main() -> None:
         if bgr is None:
             continue
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        if last_shape is not None and rgb.shape[:2] != last_shape:
+            print(f"input size changed {last_shape} -> {rgb.shape[:2]}; recreating landmarker",
+                  file=sys.stderr, flush=True)
+            landmarker.close()
+            landmarker = create_landmarker()
+        last_shape = rgb.shape[:2]
         image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         r = landmarker.detect_for_video(image, ts)
         out.write(json.dumps({
