@@ -4,6 +4,7 @@
 //
 //  録画 1 回分の出力。video2landmark（run.py）と同じ配置・同じ列構成で書く：
 //    results_data/csv/{stem}/{stem}_{face,hand,pose}.csv
+//    results_data/csv/{stem}/{stem}_metrics.csv   （グラフ用の指標．再生時に波形を出すために使う）
 //    results_data/json/{stem}/{stem}_{face,hand,pose}.json
 //    results_data/video_raw/{stem}_raw.mp4          （生映像）
 //    results_data/video_overlay/{stem}_overlay.mp4  （映像＋ランドマーク）
@@ -28,6 +29,7 @@ nonisolated final class LandmarkRecorder {
     private let overlay: H264Writer
     private let skeleton: H264Writer
     private let csv: LandmarkCSVWriter
+    private let metricsCSV: MetricsCSVWriter
     private var jsonFace: [[String: Any]] = []
     private var jsonHand: [[String: Any]] = []
     private var jsonPose: [[String: Any]] = []
@@ -55,9 +57,10 @@ nonisolated final class LandmarkRecorder {
         overlay = try H264Writer(url: overlayURL, size: size)
         skeleton = try H264Writer(url: skeletonURL, size: size)
         csv = try LandmarkCSVWriter(directory: csvDirectory, stem: stem)
+        metricsCSV = try MetricsCSVWriter(url: csvDirectory.appendingPathComponent("\(stem)_metrics.csv"))
     }
 
-    func append(_ frame: LandmarkFrame, background: CGImage?) {
+    func append(_ frame: LandmarkFrame, background: CGImage?, metrics: [MetricKind: Double]) {
         raw.append(timestampMs: frame.timestampMs) { ctx in
             SkeletonRenderer.compose(nil, background: background, in: ctx, size: size)
         }
@@ -68,6 +71,7 @@ nonisolated final class LandmarkRecorder {
             SkeletonRenderer.compose(frame, background: nil, in: ctx, size: size)
         }
         csv.append(frameIndex: frameCount, frame: frame)
+        metricsCSV.append(frameIndex: frameCount, timestampMs: frame.timestampMs, metrics: metrics)
         LandmarkJSON.append(frameIndex: frameCount, frame: frame,
                             face: &jsonFace, hand: &jsonHand, pose: &jsonPose)
         frameCount += 1
@@ -75,6 +79,7 @@ nonisolated final class LandmarkRecorder {
 
     func finish(completion: @escaping @Sendable (Error?) -> Void) {
         csv.close()
+        metricsCSV.close()
         do {
             try LandmarkJSON.write(jsonFace, to: jsonDirectory.appendingPathComponent("\(stem)_face.json"))
             try LandmarkJSON.write(jsonHand, to: jsonDirectory.appendingPathComponent("\(stem)_hand.json"))
@@ -268,4 +273,29 @@ nonisolated enum LandmarkJSON {
         let data = try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: url)
     }
+}
+
+/// グラフ用の指標を 1 行 1 フレームで書く。列は frame, timestamp_ms, 各指標（MetricKind の rawValue）。
+/// 値が無い指標は空欄。
+nonisolated final class MetricsCSVWriter {
+    private let handle: FileHandle
+    static let columns = MetricKind.allCases
+
+    static var header: String {
+        (["frame", "timestamp_ms"] + columns.map(\.rawValue)).joined(separator: ",")
+    }
+
+    init(url: URL) throws {
+        try (Self.header + "\n").write(to: url, atomically: true, encoding: .utf8)
+        handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+    }
+
+    func append(frameIndex: Int, timestampMs: Int, metrics: [MetricKind: Double]) {
+        var cols = ["\(frameIndex)", "\(timestampMs)"]
+        for k in Self.columns { cols.append(metrics[k].map { "\($0)" } ?? "") }
+        handle.write(Data((cols.joined(separator: ",") + "\n").utf8))
+    }
+
+    func close() { try? handle.close() }
 }

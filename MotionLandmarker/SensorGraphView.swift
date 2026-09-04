@@ -124,12 +124,14 @@ struct MultiSeriesGraphView: View {
     var times: [Date]? = nil
     /// 横軸に表示する時間幅（秒）。常にこの幅で固定し，起動直後も右端から左へ流れる。
     var windowSeconds: TimeInterval = 10
+    /// 横軸の右端（現時点）。nil なら最新サンプルの時刻。再生時は動画の再生位置を渡す
+    var endTime: Date? = nil
 
     private var count: Int { series.map(\.data.count).max() ?? 0 }
-    private var useTimeAxis: Bool { times.map { $0.count == count && !$0.isEmpty } ?? false }
+    private var useTimeAxis: Bool { endTime != nil || (times.map { $0.count == count && !$0.isEmpty } ?? false) }
+    private var lastTime: Date { endTime ?? times?.last ?? Date() }
     private var timeDomain: ClosedRange<Date> {
-        let last = times?.last ?? Date()
-        return last.addingTimeInterval(-windowSeconds)...last
+        lastTime.addingTimeInterval(-windowSeconds)...lastTime
     }
 
     private func clamp(_ v: Float) -> Float { min(max(v, range.lowerBound), range.upperBound) }
@@ -150,16 +152,16 @@ struct MultiSeriesGraphView: View {
             }
 
             Chart {
-                if useTimeAxis, let last = times?.last {
-                    RuleMark(x: .value("Now", last)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
+                if useTimeAxis {
+                    RuleMark(x: .value("Now", lastTime)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
                 } else if count > 0 {
                     RuleMark(x: .value("Now", count - 1)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
                 }
                 ForEach(series) { s in
                     ForEach(s.segments, id: \.run) { seg in
                         ForEach(seg.points, id: \.index) { pt in
-                            if useTimeAxis, pt.index < times!.count {
-                                LineMark(x: .value("Time", times![pt.index]), y: .value("Value", clamp(pt.value)),
+                            if useTimeAxis, let times, pt.index < times.count {
+                                LineMark(x: .value("Time", times[pt.index]), y: .value("Value", clamp(pt.value)),
                                          series: .value("Series", "\(s.id)-\(seg.run)"))
                                     .foregroundStyle(s.color)
                                     .interpolationMethod(.catmullRom)

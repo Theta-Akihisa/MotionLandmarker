@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import AVFoundation
 import Foundation
 import Observation
 import UniformTypeIdentifiers
@@ -36,7 +37,38 @@ final class AppState {
     var lastOverlayURL: URL?
     var lastOutputRoot: URL?
     /// 映像エリアで再生中の動画。nil ならカメラ映像を表示する。
-    var playbackURL: URL?
+    var playbackURL: URL? {
+        didSet { setUpPlayback() }
+    }
+    /// 再生用プレイヤー（playbackURL に対応）
+    @ObservationIgnored private(set) var player: AVPlayer?
+    @ObservationIgnored private var timeObserver: Any?
+    /// 再生中の録画の指標時系列（同じ録画の CSV から読む）。無ければ nil
+    var playbackTimeline: PlaybackTimeline?
+    /// 動画の再生位置（秒）
+    var playbackSeconds: Double = 0
+    var playbackHasWaveform: Bool { !(playbackTimeline?.isEmpty ?? true) }
+
+    private func setUpPlayback() {
+        if let player, let timeObserver { player.removeTimeObserver(timeObserver) }
+        timeObserver = nil
+        player?.pause()
+        player = nil
+        playbackTimeline = nil
+        playbackSeconds = 0
+        guard let url = playbackURL else { return }
+        let p = AVPlayer(url: url)
+        player = p
+        // 波形は同じ録画の CSV から復元する（別スレッドで読む）
+        Task.detached { [url] in
+            let t = PlaybackTimeline.load(forVideo: url)
+            await MainActor.run { if self.playbackURL == url { self.playbackTimeline = t } }
+        }
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { time in
+            Task { @MainActor in self.playbackSeconds = time.seconds.isFinite ? time.seconds : 0 }
+        }
+        p.play()
+    }
     var statusMessage: String?
 
     let camera = CameraManager()

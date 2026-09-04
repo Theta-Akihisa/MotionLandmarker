@@ -59,9 +59,9 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
             let size = background.map { CGSize(width: $0.width, height: $0.height) } ?? frameSize
             frameSize = size
             let image = SkeletonRenderer.image(frame, background: background, size: size, options: drawOptions)
-            recorder?.append(frame, background: background)
             let metrics = MotionMetrics.compute(frame, previous: previousFrame)
             previousFrame = frame
+            recorder?.append(frame, background: background, metrics: metrics)
             onFrame?(image, frame, metrics, recorder?.frameCount ?? 0)
         }
     }

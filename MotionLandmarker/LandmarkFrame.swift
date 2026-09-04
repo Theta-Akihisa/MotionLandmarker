@@ -31,6 +31,17 @@ nonisolated struct LandmarkFrame: Sendable {
     static let faceCount = 478
     static let handCount = 21
 
+    static func empty(timestampMs: Int) -> LandmarkFrame {
+        LandmarkFrame(timestampMs: timestampMs, pose: [], poseWorld: [], face: [], leftHand: [], rightHand: [])
+    }
+
+    private init(timestampMs: Int, pose: [Landmark], poseWorld: [Landmark], face: [Landmark],
+                 leftHand: [Landmark], rightHand: [Landmark]) {
+        self.timestampMs = timestampMs
+        self.pose = pose; self.poseWorld = poseWorld; self.face = face
+        self.leftHand = leftHand; self.rightHand = rightHand
+    }
+
     /// サイドカーから受け取った 1 行の JSON を解析する。`{"ready":true}` の場合は nil。
     init?(jsonLine: Data) {
         guard let obj = try? JSONSerialization.jsonObject(with: jsonLine) as? [String: Any],

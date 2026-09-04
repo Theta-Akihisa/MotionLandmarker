@@ -77,7 +77,7 @@ struct ContentView: View {
             ZStack {
                 if let url = state.playbackURL {
                     // 録画の再生（カメラ映像と同じ領域に表示）
-                    PlayerView(url: url)
+                    PlayerView(player: state.player)
                         .aspectRatio(CGFloat(state.displayImage?.width ?? 16) / CGFloat(state.displayImage?.height ?? 9),
                                      contentMode: .fit)
                         .background(Color(cgColor: SkeletonRenderer.sketchBackground))
@@ -122,7 +122,9 @@ struct ContentView: View {
             }
             .overlay(alignment: .topLeading) {
                 if let url = state.playbackURL {
-                    Text("再生中: \(url.lastPathComponent)")
+                    Text(state.playbackHasWaveform
+                         ? "再生中: \(url.lastPathComponent)"
+                         : "再生中: \(url.lastPathComponent)（波形データなし）")
                         .font(.caption2).foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.black.opacity(0.5), in: Capsule())
@@ -262,6 +264,11 @@ struct ContentView: View {
                 .frame(width: 270)
                 Divider()
                 ScrollView {
+                    // 再生中は動画の再生位置に合わせて録画の波形を出す。それ以外はライブの波形
+                    let playback = state.playbackURL != nil
+                        ? state.playbackTimeline?.slice(atVideoTime: state.playbackSeconds, window: 10) : nil
+                    let times = playback?.times ?? state.history.times
+                    let endTime = state.playbackTimeline.map { $0.date(atVideoTime: state.playbackSeconds) }
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(state.metricMode.charts) { chart in
                             let kinds = chart.kinds.filter { isVisible($0, in: chart) }
@@ -269,10 +276,13 @@ struct ContentView: View {
                                 MultiSeriesGraphView(
                                     title: chart.title,
                                     series: kinds.map { k in
-                                        MultiSeriesGraphView.Series(id: k.rawValue, label: k.label,
-                                                                    data: state.history[k], color: color(for: k))
+                                        MultiSeriesGraphView.Series(
+                                            id: k.rawValue, label: k.label,
+                                            data: playback.map { $0.series[k] ?? [] } ?? state.history[k],
+                                            color: color(for: k))
                                     },
-                                    unit: chart.unit, range: chart.yRange, times: state.history.times)
+                                    unit: chart.unit, range: chart.yRange, times: times,
+                                    endTime: state.playbackURL != nil ? endTime : nil)
                                 .padding(.horizontal)
                             }
                         }

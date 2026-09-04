@@ -34,21 +34,17 @@ struct MotionLandmarkerApp: App {
 /// AVKit の SwiftUI 版 `VideoPlayer` はこの環境で型メタデータの初期化に失敗して abort するため，
 /// AppKit の AVPlayerView を直接使う。
 struct PlayerView: NSViewRepresentable {
-    let url: URL
+    let player: AVPlayer?
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.controlsStyle = .floating
-        view.player = AVPlayer(url: url)
-        view.player?.play()
+        view.player = player
         return view
     }
 
     func updateNSView(_ view: AVPlayerView, context: Context) {
-        if (view.player?.currentItem?.asset as? AVURLAsset)?.url != url {
-            view.player = AVPlayer(url: url)
-            view.player?.play()
-        }
+        if view.player !== player { view.player = player }
     }
 }
 
