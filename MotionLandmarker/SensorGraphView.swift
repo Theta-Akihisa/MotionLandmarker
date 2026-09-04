@@ -105,12 +105,14 @@ struct MultiSeriesGraphView: View {
         let color: Color
 
         /// 連続して値がある区間ごとに分ける。区間ごとに別の系列として描くと線がつながらない。
-        var segments: [(run: Int, points: [(index: Int, value: Float)])] {
+        /// `stride` 個おきに間引く（欠損の境界は保つ）。
+        func segments(stride: Int) -> [(run: Int, points: [(index: Int, value: Float)])] {
             var out: [(Int, [(Int, Float)])] = []
             var current: [(Int, Float)] = []
             for (i, v) in data.enumerated() {
-                if let v { current.append((i, v)) }
-                else if !current.isEmpty { out.append((out.count, current)); current = [] }
+                if let v {
+                    if i % stride == 0 || current.isEmpty { current.append((i, v)) }
+                } else if !current.isEmpty { out.append((out.count, current)); current = [] }
             }
             if !current.isEmpty { out.append((out.count, current)) }
             return out
@@ -124,10 +126,13 @@ struct MultiSeriesGraphView: View {
     var times: [Date]? = nil
     /// 横軸に表示する時間幅（秒）。常にこの幅で固定し，起動直後も右端から左へ流れる。
     var windowSeconds: TimeInterval = 10
+    /// 1 系列あたりの描画点数の上限。これを超える分は間引く（描画コストを抑えるため）
+    var maxPoints = 240
     /// 横軸の右端（現時点）。nil なら最新サンプルの時刻。再生時は動画の再生位置を渡す
     var endTime: Date? = nil
 
     private var count: Int { series.map(\.data.count).max() ?? 0 }
+    private var stride: Int { max(1, count / maxPoints) }
     private var useTimeAxis: Bool { endTime != nil || (times.map { $0.count == count && !$0.isEmpty } ?? false) }
     private var lastTime: Date { endTime ?? times?.last ?? Date() }
     private var timeDomain: ClosedRange<Date> {
@@ -158,7 +163,7 @@ struct MultiSeriesGraphView: View {
                     RuleMark(x: .value("Now", count - 1)).foregroundStyle(.secondary).lineStyle(StrokeStyle(lineWidth: 1))
                 }
                 ForEach(series) { s in
-                    ForEach(s.segments, id: \.run) { seg in
+                    ForEach(s.segments(stride: stride), id: \.run) { seg in
                         ForEach(seg.points, id: \.index) { pt in
                             if useTimeAxis, let times, pt.index < times.count {
                                 LineMark(x: .value("Time", times[pt.index]), y: .value("Value", clamp(pt.value)),

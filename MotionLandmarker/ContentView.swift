@@ -9,9 +9,12 @@ struct ContentView: View {
     @Bindable var state: AppState
 
     /// 映像部分の高さ。仕切りをドラッグして変え，次回起動時も保持する。
-    @AppStorage("videoHeight") private var videoHeight: Double = 360
+    /// ドラッグ中は `draggingHeight` だけを動かし（UserDefaults への書き込みを避ける），終了時に保存する。
+    @AppStorage("videoHeight") private var savedVideoHeight: Double = 360
+    @State private var draggingHeight: Double?
     @State private var dragStartHeight: Double?
     private let videoHeightRange: ClosedRange<Double> = 160...1080
+    private var videoHeight: Double { draggingHeight ?? savedVideoHeight }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,11 +43,19 @@ struct ContentView: View {
         .gesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { g in
-                    if dragStartHeight == nil { dragStartHeight = videoHeight }
-                    let h = (dragStartHeight ?? videoHeight) + g.translation.height
-                    videoHeight = min(max(h, videoHeightRange.lowerBound), videoHeightRange.upperBound)
+                    if dragStartHeight == nil { dragStartHeight = savedVideoHeight }
+                    let h = (dragStartHeight ?? savedVideoHeight) + g.translation.height
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) {
+                        draggingHeight = min(max(h, videoHeightRange.lowerBound), videoHeightRange.upperBound)
+                    }
                 }
-                .onEnded { _ in dragStartHeight = nil }
+                .onEnded { _ in
+                    if let h = draggingHeight { savedVideoHeight = h }
+                    draggingHeight = nil
+                    dragStartHeight = nil
+                }
         )
         .help("ドラッグして映像の高さを調整")
     }
