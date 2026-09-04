@@ -34,6 +34,8 @@ final class AppState {
     var recordedFrames = 0
     var lastOverlayURL: URL?
     var lastOutputRoot: URL?
+    /// 映像エリアで再生中の動画。nil ならカメラ映像を表示する。
+    var playbackURL: URL?
     var statusMessage: String?
 
     let camera = CameraManager()
@@ -122,6 +124,7 @@ final class AppState {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd_HHmmss"
         let stem = "live_" + f.string(from: Date())
+        playbackURL = nil
         do {
             try pipeline.startRecording(outputRoot: outputRoot, stem: stem)
             isRecording = true
@@ -150,6 +153,15 @@ final class AppState {
                 }
                 completion?()
             }
+        }
+    }
+
+    /// 直前の録画（overlay 動画）を映像エリアで再生する。再生中なら止めてカメラ映像に戻す。
+    func togglePlayback() {
+        if playbackURL != nil {
+            playbackURL = nil
+        } else if let url = lastOverlayURL, !isRecording {
+            playbackURL = url
         }
     }
 

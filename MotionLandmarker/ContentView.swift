@@ -7,7 +7,6 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var state: AppState
-    @Environment(\.openWindow) private var openWindow
 
     /// 映像部分の高さ。仕切りをドラッグして変え，次回起動時も保持する。
     @AppStorage("videoHeight") private var videoHeight: Double = 360
@@ -76,7 +75,13 @@ struct ContentView: View {
             .padding(.top, 8)
 
             ZStack {
-                if let img = state.displayImage {
+                if let url = state.playbackURL {
+                    // 録画の再生（カメラ映像と同じ領域に表示）
+                    PlayerView(url: url)
+                        .aspectRatio(CGFloat(state.displayImage?.width ?? 16) / CGFloat(state.displayImage?.height ?? 9),
+                                     contentMode: .fit)
+                        .background(Color(cgColor: SkeletonRenderer.sketchBackground))
+                } else if let img = state.displayImage {
                     Image(decorative: img, scale: 1)
                         .resizable()
                         .aspectRatio(CGFloat(img.width) / CGFloat(img.height), contentMode: .fit)
@@ -109,6 +114,15 @@ struct ContentView: View {
             .overlay(alignment: .bottomLeading) {
                 if !state.camera.currentCameraName.isEmpty {
                     Text(state.camera.currentCameraName)
+                        .font(.caption2).foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.black.opacity(0.5), in: Capsule())
+                        .padding(8)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let url = state.playbackURL {
+                    Text("再生中: \(url.lastPathComponent)")
                         .font(.caption2).foregroundStyle(.white)
                         .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(.black.opacity(0.5), in: Capsule())
@@ -157,6 +171,7 @@ struct ContentView: View {
                     tint: state.isRecording ? .red : (state.isReady ? .primary : .secondary)
                 ) { state.toggleRecording() }
                 .disabled(!state.isReady)
+                .help(state.playbackURL != nil ? "録画を始めると再生は止まります" : "")
                 .keyboardShortcut("r", modifiers: .command)
 
                 CameraControlButton(
@@ -166,10 +181,11 @@ struct ContentView: View {
                 .disabled(!state.camera.canSwitchCamera)
 
                 CameraControlButton(
-                    icon: "play.circle", label: "Play",
-                    tint: state.lastOverlayURL != nil ? .primary : .secondary
-                ) { if let url = state.lastOverlayURL { openWindow(id: "videoPlayback", value: url) } }
-                .disabled(state.lastOverlayURL == nil)
+                    icon: state.playbackURL != nil ? "video.circle" : "play.circle",
+                    label: state.playbackURL != nil ? "Live" : "Play",
+                    tint: (state.lastOverlayURL != nil && !state.isRecording) ? .primary : .secondary
+                ) { state.togglePlayback() }
+                .disabled(state.lastOverlayURL == nil || state.isRecording)
 
                 CameraControlButton(icon: "folder", label: "Reveal", tint: .primary) { state.revealOutput() }
 

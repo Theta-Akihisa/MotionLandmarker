@@ -27,19 +27,10 @@ struct MotionLandmarkerApp: App {
                 }
         }
         .defaultSize(width: 1280, height: 1000)
-
-        // 録画した overlay 動画の再生ウィンドウ
-        WindowGroup("Video Playback", id: "videoPlayback", for: URL.self) { $url in
-            if let url = url {
-                PlayerView(url: url)
-                    .ignoresSafeArea()
-                    .frame(minWidth: 640, minHeight: 360)
-            }
-        }
-        .defaultSize(width: 1280, height: 720)
     }
 }
 
+/// 録画した動画を映像エリアで再生するビュー。
 /// AVKit の SwiftUI 版 `VideoPlayer` はこの環境で型メタデータの初期化に失敗して abort するため，
 /// AppKit の AVPlayerView を直接使う。
 struct PlayerView: NSViewRepresentable {
