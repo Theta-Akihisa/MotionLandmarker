@@ -149,8 +149,8 @@ struct MultiSeriesGraphView: View {
                 // 凡例は 1 項目の幅を固定し右端から並べる。ラベルの長さや系列数が違っても
                 // グラフ間で同じ列に揃う（3 系列のグラフは左へ 1 列分伸びるだけ）
                 ForEach(series) { s in
-                    HStack(spacing: 4) {
-                        Circle().fill(s.color).frame(width: 11, height: 11)
+                    HStack(spacing: 2) {
+                        Circle().fill(s.color).frame(width: 11, height: 11).padding(.trailing, 3)
                         Text(s.label).font(.title3).lineLimit(1)
                             .frame(width: 96, alignment: .leading)
                         // 値の有無や桁数で幅が変わらないよう固定幅にする（"-180.00" が収まる幅）
