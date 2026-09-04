@@ -146,10 +146,13 @@ struct MultiSeriesGraphView: View {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 Text(title).font(.title2.weight(.semibold))
                 Spacer()
+                // 凡例は 1 項目の幅を固定し右端から並べる。ラベルの長さや系列数が違っても
+                // グラフ間で同じ列に揃う（3 系列のグラフは左へ 1 列分伸びるだけ）
                 ForEach(series) { s in
                     HStack(spacing: 5) {
                         Circle().fill(s.color).frame(width: 11, height: 11)
-                        Text(s.label).font(.title3)
+                        Text(s.label).font(.title3).lineLimit(1)
+                            .frame(width: 128, alignment: .leading)
                         // 値の有無や桁数で幅が変わらないよう固定幅にする（"-180.00" が収まる幅）
                         Text((s.data.last ?? nil).map { String(format: "%.2f", $0) } ?? "--")
                             .font(.title3).foregroundStyle(.secondary).monospacedDigit()
