@@ -35,7 +35,7 @@ final class AppState {
     @ObservationIgnored private var liveHistory = MetricHistory(capacity: 600)
     @ObservationIgnored private var historyDirty = false
     @ObservationIgnored private var chartTimer: Timer?
-    static let chartRefreshInterval: TimeInterval = 1.0 / 15
+    static let chartRefreshInterval: TimeInterval = 1.0 / 20
     var inferenceFPS: Double = 0
     var isRecording = false
     var recordedFrames = 0
