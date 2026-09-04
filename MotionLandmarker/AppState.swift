@@ -77,6 +77,8 @@ final class AppState {
         p.play()
     }
     var statusMessage: String?
+    /// 推論プロセスが終了したときの標準エラー出力（原因調査用）
+    var sidecarExitLog: String = ""
 
     let camera = CameraManager()
 
@@ -142,6 +144,29 @@ final class AppState {
         }
     }
 
+    /// 推論プロセスを起動し直す（落ちたとき用）
+    func restartSidecar() {
+        guard !isRecording, !isImporting else { return }
+        client?.stop()
+        client = nil
+        pipeline = nil
+        sidecarState = .idle
+        start()
+    }
+
+    /// 推論プロセスの終了ログをダイアログで表示する
+    func showSidecarLog() {
+        let alert = NSAlert()
+        alert.messageText = "推論プロセスのログ"
+        alert.informativeText = sidecarExitLog.isEmpty ? "（ログはありません）" : String(sidecarExitLog.suffix(3000))
+        alert.addButton(withTitle: "閉じる")
+        alert.addButton(withTitle: "ログをコピー")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(sidecarExitLog, forType: .string)
+        }
+    }
+
     private func launch(uv: URL, project: URL) {
         let client = LandmarkerClient()
         let pipeline = LandmarkPipeline(client: client)
@@ -149,7 +174,8 @@ final class AppState {
         client.onReady = { Task { @MainActor in self.sidecarState = .ready } }
         client.onExit = { code, log in
             Task { @MainActor in
-                self.sidecarState = .failed("推論プロセスが終了しました (code \(code))\n\(log.suffix(600))")
+                self.sidecarExitLog = log
+                self.sidecarState = .failed("推論プロセスが終了しました (code \(code))．「ログ」で詳細を表示")
             }
         }
         pipeline.onFrame = { image, _, metrics, recorded in
@@ -278,7 +304,7 @@ final class AppState {
             playbackURL = r.overlayURL   // 生成した overlay 動画と波形を再生
         case .failure(let e):
             var msg = "動画の処理に失敗: \(e.localizedDescription)"
-            if case .failed(let why) = sidecarState { msg += " / 推論プロセス: \(why)" }
+            if case .failed = sidecarState { msg += "（推論プロセスが終了しました．上部の「ログ」で詳細を確認）" }
             statusMessage = msg
             refreshLastRecording()
         }

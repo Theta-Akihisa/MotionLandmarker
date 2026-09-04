@@ -28,7 +28,27 @@ nonisolated enum SelfCheck {
         let pipeline = LandmarkPipeline(client: client)
         do { try client.start(uv: uv, project: sidecar) } catch { print("sidecar start failed: \(error)"); return 1 }
         guard ready.wait(timeout: .now() + 120) == .success else { print("sidecar did not become ready"); return 1 }
+        // アプリ内と同じ条件にするため，環境変数 ML_FAKE_CAMERA に動画を指定すると
+        // 別スレッドからカメラ相当のフレームを流し続ける（処理開始まで 1 秒流し，処理中は捨てられる）
+        var fakeCameraRunning = true
+        if let camPath = ProcessInfo.processInfo.environment["ML_FAKE_CAMERA"] {
+            Thread.detachNewThread {
+                let asset = AVURLAsset(url: URL(fileURLWithPath: camPath))
+                guard let track = asset.tracks(withMediaType: .video).first,
+                      let reader = try? AVAssetReader(asset: asset) else { return }
+                let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+                reader.add(out); reader.startReading()
+                var ms = 0
+                while fakeCameraRunning, let sb = out.copyNextSampleBuffer() {
+                    if let pb = CMSampleBufferGetImageBuffer(sb) { pipeline.handleCameraFrame(pb, ms) }
+                    ms += 33; usleep(33_000)
+                }
+            }
+            sleep(1)
+        }
         pipeline.setCameraPaused(true)
+        defer { fakeCameraRunning = false }
         do {
             let r = try VideoImporter.run(videoURL: videoURL, outputRoot: outputRoot, pipeline: pipeline,
                                           progress: { done, total in if done % 50 == 0 { print("\(done)/\(total)") } },

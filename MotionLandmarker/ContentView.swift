@@ -172,6 +172,9 @@ struct ContentView: View {
             case .failed(let msg):
                 Circle().fill(.red).frame(width: 8, height: 8)
                 Text(msg).lineLimit(2).help(msg)
+                Button("ログ") { state.showSidecarLog() }
+                Button("再起動") { state.restartSidecar() }
+                    .disabled(state.isRecording || state.isImporting)
             }
         }
         .font(.callout)
