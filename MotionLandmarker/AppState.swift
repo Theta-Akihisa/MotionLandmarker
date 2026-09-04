@@ -277,7 +277,9 @@ final class AppState {
             lastOutputRoot = outputRoot
             playbackURL = r.overlayURL   // 生成した overlay 動画と波形を再生
         case .failure(let e):
-            statusMessage = "動画の処理に失敗: \(e.localizedDescription)"
+            var msg = "動画の処理に失敗: \(e.localizedDescription)"
+            if case .failed(let why) = sidecarState { msg += " / 推論プロセス: \(why)" }
+            statusMessage = msg
             refreshLastRecording()
         }
     }

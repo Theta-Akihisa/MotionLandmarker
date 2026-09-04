@@ -16,6 +16,9 @@ struct MotionLandmarkerApp: App {
         if CommandLine.arguments.contains("--check") {
             exit(SelfCheck.run(arguments: CommandLine.arguments))
         }
+        if CommandLine.arguments.contains("--import") {
+            exit(SelfCheck.runImport(arguments: CommandLine.arguments))
+        }
     }
 
     var body: some Scene {

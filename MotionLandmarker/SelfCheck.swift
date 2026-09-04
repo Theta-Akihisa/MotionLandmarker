@@ -12,6 +12,35 @@ import AVFoundation
 import Foundation
 
 nonisolated enum SelfCheck {
+    /// `--import <動画> [サイドカーdir] [出力先]`：アプリの「動画を処理…」と同じ VideoImporter を GUI 無しで動かす
+    static func runImport(arguments: [String]) -> Int32 {
+        guard let i = arguments.firstIndex(of: "--import"), i + 1 < arguments.count else { return 2 }
+        let videoURL = URL(fileURLWithPath: arguments[i + 1])
+        let sidecar = URL(fileURLWithPath: i + 2 < arguments.count ? arguments[i + 2]
+                          : FileManager.default.currentDirectoryPath + "/landmarker")
+        let outputRoot = URL(fileURLWithPath: i + 3 < arguments.count ? arguments[i + 3]
+                             : FileManager.default.temporaryDirectory.appendingPathComponent("MotionLandmarker_import").path)
+        guard let uv = SidecarBootstrap.locateUV() else { print("uv not found"); return 1 }
+        let client = LandmarkerClient()
+        let ready = DispatchSemaphore(value: 0)
+        client.onReady = { ready.signal() }
+        client.onExit = { code, log in if code != 0 { print("sidecar exited \(code)\n\(log)") } }
+        let pipeline = LandmarkPipeline(client: client)
+        do { try client.start(uv: uv, project: sidecar) } catch { print("sidecar start failed: \(error)"); return 1 }
+        guard ready.wait(timeout: .now() + 120) == .success else { print("sidecar did not become ready"); return 1 }
+        pipeline.setCameraPaused(true)
+        do {
+            let r = try VideoImporter.run(videoURL: videoURL, outputRoot: outputRoot, pipeline: pipeline,
+                                          progress: { done, total in if done % 50 == 0 { print("\(done)/\(total)") } },
+                                          isCancelled: { false })
+            print("imported stem=\(r.stem) frames=\(r.frames) skipped=\(r.skippedVideoFrames) overlay=\(r.overlayURL.path)")
+        } catch {
+            print("import failed: \(error.localizedDescription)"); client.stop(); return 1
+        }
+        client.stop()
+        return 0
+    }
+
     static func run(arguments: [String]) -> Int32 {
         guard let i = arguments.firstIndex(of: "--check"), i + 1 < arguments.count else { return 2 }
         let videoPath = arguments[i + 1]
