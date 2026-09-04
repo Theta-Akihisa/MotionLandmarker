@@ -377,7 +377,7 @@ private struct CameraControlButton: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 34)).foregroundStyle(tint)
+                Image(systemName: icon).font(.system(size: 27)).foregroundStyle(tint)
                 Text(label).font(.title3).foregroundStyle(tint)
             }
             .frame(maxWidth: .infinity)
