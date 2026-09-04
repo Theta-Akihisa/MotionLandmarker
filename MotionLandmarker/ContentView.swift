@@ -78,8 +78,7 @@ struct ContentView: View {
                 if let url = state.playbackURL {
                     // 録画の再生（カメラ映像と同じ領域に表示）
                     PlayerView(player: state.player)
-                        .aspectRatio(CGFloat(state.displayImage?.width ?? 16) / CGFloat(state.displayImage?.height ?? 9),
-                                     contentMode: .fit)
+                        .aspectRatio(state.playbackAspect, contentMode: .fit)
                         .background(Color(cgColor: SkeletonRenderer.sketchBackground))
                 } else if let img = state.displayImage {
                     Image(decorative: img, scale: 1)

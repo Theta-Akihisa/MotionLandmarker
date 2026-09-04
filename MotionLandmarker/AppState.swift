@@ -47,6 +47,8 @@ final class AppState {
     var playbackTimeline: PlaybackTimeline?
     /// 動画の再生位置（秒）
     var playbackSeconds: Double = 0
+    /// 再生中の動画の縦横比（幅 / 高さ）。動画の実サイズから取る
+    var playbackAspect: CGFloat = 16.0 / 9.0
     var playbackHasWaveform: Bool { !(playbackTimeline?.isEmpty ?? true) }
 
     /// 動画ファイルの処理中か
@@ -66,6 +68,12 @@ final class AppState {
         guard let url = playbackURL else { return }
         let p = AVPlayer(url: url)
         player = p
+        // 縦横比は動画のトラックから取る（回転メタデータも考慮）
+        if let track = AVURLAsset(url: url).tracks(withMediaType: .video).first {
+            let size = track.naturalSize.applying(track.preferredTransform)
+            let w = abs(size.width), h = abs(size.height)
+            if w > 0, h > 0 { playbackAspect = w / h }
+        }
         // 波形は同じ録画の CSV から復元する（別スレッドで読む）
         Task.detached { [url] in
             let t = PlaybackTimeline.load(forVideo: url)
