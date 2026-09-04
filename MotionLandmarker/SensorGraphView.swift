@@ -142,7 +142,7 @@ struct MultiSeriesGraphView: View {
     private func clamp(_ v: Float) -> Float { min(max(v, range.lowerBound), range.upperBound) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 30) {
                 Text(title).font(.title2.weight(.semibold))
                 Spacer()
