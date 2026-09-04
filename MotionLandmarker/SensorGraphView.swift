@@ -150,8 +150,10 @@ struct MultiSeriesGraphView: View {
                     HStack(spacing: 5) {
                         Circle().fill(s.color).frame(width: 11, height: 11)
                         Text(s.label).font(.title3)
+                        // 値の有無や桁数で幅が変わらないよう固定幅にする（"-180.00" が収まる幅）
                         Text((s.data.last ?? nil).map { String(format: "%.2f", $0) } ?? "--")
                             .font(.title3).foregroundStyle(.secondary).monospacedDigit()
+                            .frame(width: 72, alignment: .trailing)
                     }
                 }
             }
