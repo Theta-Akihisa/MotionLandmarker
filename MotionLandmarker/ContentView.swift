@@ -240,13 +240,13 @@ struct ContentView: View {
                         .buttonStyle(.link).disabled(state.isRecording)
                 }
             }
-            .font(.caption)
+            .font(.callout)
             if let msg = state.statusMessage {
-                Text(msg).font(.caption).foregroundStyle(.secondary)
+                Text(msg).font(.callout).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
     }
@@ -365,11 +365,13 @@ private struct CameraControlButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon).font(.title2).foregroundStyle(tint)
-                Text(label).font(.caption).foregroundStyle(tint)
+            VStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 34)).foregroundStyle(tint)
+                Text(label).font(.title3).foregroundStyle(tint)
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
