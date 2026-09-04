@@ -184,14 +184,15 @@ final class AppState {
         panel.prompt = "選択"
         if panel.runModal() == .OK, let url = panel.url {
             outputRoot = url
-            statusMessage = "保存先: \(url.path)"
+            // 保存先はボタン列の下に常時表示しているため，ここでは重ねて出さない
+            statusMessage = nil
         }
     }
 
     func resetOutputRoot() {
         guard !isRecording else { return }
         outputRoot = Self.defaultOutputRoot
-        statusMessage = "保存先を既定に戻しました: \(outputRoot.path)"
+        statusMessage = nil
     }
 
     /// 終了処理。録画中なら書き出し完了後に completion を呼ぶ。
