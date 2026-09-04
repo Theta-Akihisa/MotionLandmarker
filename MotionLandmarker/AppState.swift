@@ -49,6 +49,12 @@ final class AppState {
     var playbackSeconds: Double = 0
     var playbackHasWaveform: Bool { !(playbackTimeline?.isEmpty ?? true) }
 
+    /// 動画ファイルの処理中か
+    var isImporting = false
+    var importProgress: (done: Int, total: Int) = (0, 0)
+    var importName = ""
+    @ObservationIgnored private var importCancelled = false
+
     private func setUpPlayback() {
         if let player, let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
@@ -176,7 +182,7 @@ final class AppState {
     }
 
     private func startRecording() {
-        guard let pipeline, isReady else { return }
+        guard let pipeline, isReady, !isImporting else { return }
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd_HHmmss"
         let stem = "live_" + f.string(from: Date())
@@ -218,6 +224,60 @@ final class AppState {
             playbackURL = nil
         } else if let url = lastOverlayURL, !isRecording {
             playbackURL = url
+        }
+    }
+
+    // MARK: - 動画ファイルの読み込み
+
+    /// 動画を選んで処理し，完了したら overlay 動画と波形を再生する
+    func importVideo() {
+        guard let pipeline, isReady, !isRecording, !isImporting else { return }
+        let panel = NSOpenPanel()
+        panel.title = "処理する動画を選ぶ"
+        panel.message = "動画のランドマークを抽出し，保存先に CSV / JSON / 動画3種を生成します"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.movie, .mpeg4Movie, .quickTimeMovie, .avi]
+        panel.prompt = "処理"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        playbackURL = nil
+        isImporting = true
+        importCancelled = false
+        importName = url.lastPathComponent
+        importProgress = (0, 0)
+        statusMessage = nil
+        pipeline.setCameraPaused(true)
+        let outputRoot = self.outputRoot
+        Task.detached { [self] in
+            let result = Result {
+                try VideoImporter.run(videoURL: url, outputRoot: outputRoot, pipeline: pipeline,
+                                      progress: { done, total in
+                                          Task { @MainActor in self.importProgress = (done, total) }
+                                      },
+                                      isCancelled: { MainActor.assumeIsolated { self.importCancelled } })
+            }
+            await MainActor.run { self.finishImport(result) }
+        }
+    }
+
+    func cancelImport() { importCancelled = true }
+
+    private func finishImport(_ result: Result<VideoImporter.Result, Error>) {
+        pipeline?.setCameraPaused(false)
+        isImporting = false
+        switch result {
+        case .success(let r):
+            var msg = "\(importName) を処理しました（\(r.frames) フレーム）→ \(outputRoot.path)"
+            if r.skippedVideoFrames > 0 { msg += "（動画に書けなかったフレーム \(r.skippedVideoFrames)）" }
+            statusMessage = msg
+            lastOverlayURL = r.overlayURL
+            lastOutputRoot = outputRoot
+            playbackURL = r.overlayURL   // 生成した overlay 動画と波形を再生
+        case .failure(let e):
+            statusMessage = "動画の処理に失敗: \(e.localizedDescription)"
+            refreshLastRecording()
         }
     }
 

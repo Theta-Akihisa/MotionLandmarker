@@ -131,6 +131,20 @@ struct ContentView: View {
                         .padding(8)
                 }
             }
+            .overlay(alignment: .center) {
+                if state.isImporting {
+                    VStack(spacing: 8) {
+                        ProgressView(value: Double(state.importProgress.done),
+                                     total: Double(max(1, state.importProgress.total)))
+                            .frame(width: 320)
+                        Text("処理中: \(state.importName)  \(state.importProgress.done) / \(state.importProgress.total) フレーム")
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(16)
+                    .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if state.isRecording {
                     HStack(spacing: 5) {
@@ -172,7 +186,7 @@ struct ContentView: View {
                     label: state.isRecording ? "Stop" : "Record",
                     tint: state.isRecording ? .red : (state.isReady ? .primary : .secondary)
                 ) { state.toggleRecording() }
-                .disabled(!state.isReady)
+                .disabled(!state.isReady || state.isImporting)
                 .help(state.playbackURL != nil ? "録画を始めると再生は止まります" : "")
                 .keyboardShortcut("r", modifiers: .command)
 
@@ -187,15 +201,23 @@ struct ContentView: View {
                     label: state.playbackURL != nil ? "Live" : "Play",
                     tint: (state.lastOverlayURL != nil && !state.isRecording) ? .primary : .secondary
                 ) { state.togglePlayback() }
-                .disabled(state.lastOverlayURL == nil || state.isRecording)
+                .disabled(state.lastOverlayURL == nil || state.isRecording || state.isImporting)
                 .help("最新の録画を再生 / カメラ映像に戻る")
 
                 CameraControlButton(
                     icon: "folder.badge.plus", label: "選んで再生…",
                     tint: state.isRecording ? .secondary : .primary
                 ) { state.openRecordingForPlayback() }
-                .disabled(state.isRecording)
+                .disabled(state.isRecording || state.isImporting)
                 .help("過去の録画を選んで再生")
+
+                CameraControlButton(
+                    icon: state.isImporting ? "xmark.circle" : "square.and.arrow.down",
+                    label: state.isImporting ? "中止" : "動画を処理…",
+                    tint: state.isImporting ? .red : ((state.isReady && !state.isRecording) ? .primary : .secondary)
+                ) { state.isImporting ? state.cancelImport() : state.importVideo() }
+                .disabled(!state.isReady || state.isRecording)
+                .help("動画ファイルを読み込んでランドマークを抽出し，CSV / JSON / 動画3種を生成して再生する")
 
                 CameraControlButton(icon: "folder", label: "Reveal", tint: .primary) { state.revealOutput() }
 
