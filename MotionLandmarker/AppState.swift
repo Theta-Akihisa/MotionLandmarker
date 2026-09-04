@@ -52,7 +52,29 @@ final class AppState {
         }
         return AppState.defaultOutputRoot
     }() {
-        didSet { UserDefaults.standard.set(outputRoot.path, forKey: Self.outputRootDefaultsKey) }
+        didSet {
+            UserDefaults.standard.set(outputRoot.path, forKey: Self.outputRootDefaultsKey)
+            refreshLastRecording()
+        }
+    }
+
+    /// 保存先にある最新の overlay 動画を Play の対象にする（起動直後や保存先の変更後）
+    func refreshLastRecording() {
+        let dir = outputRoot.appendingPathComponent("video_overlay")
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            lastOverlayURL = nil
+            return
+        }
+        let latest = items
+            .filter { $0.pathExtension.lowercased() == "mp4" }
+            .max { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return da < db
+            }
+        lastOverlayURL = latest
+        if playbackURL != nil, latest == nil { playbackURL = nil }
     }
     var isDefaultOutputRoot: Bool { outputRoot.standardizedFileURL == Self.defaultOutputRoot.standardizedFileURL }
 
@@ -64,6 +86,7 @@ final class AppState {
 
     func start() {
         guard client == nil else { return }
+        refreshLastRecording()
         camera.start()
         sidecarState = .preparing("サイドカーを準備中…")
         Task.detached { [self] in
