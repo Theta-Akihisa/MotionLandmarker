@@ -198,7 +198,7 @@ struct MultiSeriesGraphView: View {
             .chartXScale(domain: useTimeAxis ? timeDomain : Date()...Date())
             .chartXAxis(.hidden)
             .chartLegend(.hidden)
-            .frame(height: 150)
+            .frame(height: 120)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
