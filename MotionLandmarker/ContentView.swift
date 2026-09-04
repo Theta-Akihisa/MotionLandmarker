@@ -323,6 +323,22 @@ struct ContentView: View {
                         }
                     }
                     .padding(.vertical, 12)
+                    // 現在位置（再生中は再生位置）を示す縦線。横軸の終端は常に右端なので，
+                    // 全グラフを縦に貫く 1 本の線をプロット領域の右端に重ねる
+                    .overlay(alignment: .trailing) {
+                        VStack(spacing: 0) {
+                            Text(state.playbackURL != nil ? "再生位置" : "現在")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.red, in: Capsule())
+                            Rectangle().fill(Color.red).frame(width: 2)
+                        }
+                        .padding(.vertical, 4)
+                        // 外側の余白 16 + カード内の余白 12 = プロット領域の右端
+                        .padding(.trailing, 16 + 12 - 1)
+                        .allowsHitTesting(false)
+                    }
                 }
             }
         }
