@@ -8,6 +8,7 @@
 import AppKit
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 @Observable
 final class AppState {
@@ -184,6 +185,24 @@ final class AppState {
         if playbackURL != nil {
             playbackURL = nil
         } else if let url = lastOverlayURL, !isRecording {
+            playbackURL = url
+        }
+    }
+
+    /// 過去の録画をファイル選択ダイアログで選んで映像エリアで再生する
+    func openRecordingForPlayback() {
+        guard !isRecording else { return }
+        let panel = NSOpenPanel()
+        panel.title = "再生する録画を選ぶ"
+        panel.message = "再生する動画（overlay / raw / skeleton）を選んでください"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
+        let overlayDir = outputRoot.appendingPathComponent("video_overlay")
+        panel.directoryURL = FileManager.default.fileExists(atPath: overlayDir.path) ? overlayDir : outputRoot
+        panel.prompt = "再生"
+        if panel.runModal() == .OK, let url = panel.url {
             playbackURL = url
         }
     }

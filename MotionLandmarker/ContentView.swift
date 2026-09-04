@@ -186,6 +186,14 @@ struct ContentView: View {
                     tint: (state.lastOverlayURL != nil && !state.isRecording) ? .primary : .secondary
                 ) { state.togglePlayback() }
                 .disabled(state.lastOverlayURL == nil || state.isRecording)
+                .help("最新の録画を再生 / カメラ映像に戻る")
+
+                CameraControlButton(
+                    icon: "folder.badge.plus", label: "選んで再生…",
+                    tint: state.isRecording ? .secondary : .primary
+                ) { state.openRecordingForPlayback() }
+                .disabled(state.isRecording)
+                .help("過去の録画を選んで再生")
 
                 CameraControlButton(icon: "folder", label: "Reveal", tint: .primary) { state.revealOutput() }
 
