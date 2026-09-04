@@ -53,7 +53,8 @@ final class AppState {
     var isImporting = false
     var importProgress: (done: Int, total: Int) = (0, 0)
     var importName = ""
-    @ObservationIgnored private var importCancelled = false
+    /// 処理スレッドから読むため，メインアクタ外でも安全なフラグにする
+    @ObservationIgnored private let importCancel = CancelFlag()
 
     private func setUpPlayback() {
         if let player, let timeObserver { player.removeTimeObserver(timeObserver) }
@@ -244,7 +245,7 @@ final class AppState {
 
         playbackURL = nil
         isImporting = true
-        importCancelled = false
+        importCancel.reset()
         importName = url.lastPathComponent
         importProgress = (0, 0)
         statusMessage = nil
@@ -256,13 +257,13 @@ final class AppState {
                                       progress: { done, total in
                                           Task { @MainActor in self.importProgress = (done, total) }
                                       },
-                                      isCancelled: { MainActor.assumeIsolated { self.importCancelled } })
+                                      isCancelled: { [importCancel] in importCancel.isCancelled })
             }
             await MainActor.run { self.finishImport(result) }
         }
     }
 
-    func cancelImport() { importCancelled = true }
+    func cancelImport() { importCancel.cancel() }
 
     private func finishImport(_ result: Result<VideoImporter.Result, Error>) {
         pipeline?.setCameraPaused(false)
@@ -338,4 +339,13 @@ final class AppState {
         }
         if isRecording { stopRecording(completion: finish) } else { finish() }
     }
+}
+
+/// スレッド間で共有する中止フラグ
+nonisolated final class CancelFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+    func cancel() { lock.lock(); flag = true; lock.unlock() }
+    func reset() { lock.lock(); flag = false; lock.unlock() }
 }
