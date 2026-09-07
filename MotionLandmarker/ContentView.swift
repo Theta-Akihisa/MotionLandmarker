@@ -20,10 +20,10 @@ struct ContentView: View {
         VStack(spacing: 0) {
             cameraSection
                 .frame(height: videoHeight)
-            controlButtons
             if state.playbackURL != nil {
                 transportBar
             }
+            controlButtons
             resizeHandle
             graphSection
                 .frame(minHeight: 200)
