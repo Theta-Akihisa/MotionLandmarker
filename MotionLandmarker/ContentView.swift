@@ -42,7 +42,7 @@ struct ContentView: View {
                 Button { state.step(frames: -1) } label: { Image(systemName: "backward.frame") }
                     .help("1 フレーム戻る")
                 Button { state.togglePlayPause() } label: {
-                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 28)
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 34)
                 }
                 .keyboardShortcut(.space, modifiers: [])
                 .help("再生 / 一時停止（スペース）")
@@ -53,9 +53,9 @@ struct ContentView: View {
                     Text(Self.timeString(state.playbackSeconds))
                     Text(Self.timeString(state.playbackDuration)).foregroundStyle(.secondary)
                 }
-                .font(.title3).monospacedDigit()
+                .font(.title2).monospacedDigit()
             }
-            .font(.system(size: 26))
+            .font(.system(size: 32))
             .buttonStyle(.borderless)
             .padding(.horizontal, 12)
             .frame(width: checkboxColumnWidth + 1, alignment: .leading)
