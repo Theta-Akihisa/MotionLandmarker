@@ -41,7 +41,7 @@ struct PlayerView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
-        view.controlsStyle = .floating
+        view.controlsStyle = .none   // 操作はアプリ側の再生バーで行う
         view.player = player
         return view
     }

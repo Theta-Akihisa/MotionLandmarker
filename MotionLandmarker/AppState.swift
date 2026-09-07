@@ -52,6 +52,13 @@ final class AppState {
     var playbackTimeline: PlaybackTimeline?
     /// 動画の再生位置（秒）
     var playbackSeconds: Double = 0
+    /// 動画の長さ（秒）
+    var playbackDuration: Double = 0
+    /// 再生中か（一時停止中は false）
+    var isPlaying = false
+    /// 動画のフレームレート（コマ送り用）
+    var playbackFPS: Double = 30
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
     /// 再生中の動画の縦横比（幅 / 高さ）。動画の実サイズから取る
     var playbackAspect: CGFloat = 16.0 / 9.0
 
@@ -121,6 +128,7 @@ final class AppState {
     private func setUpPlayback() {
         if let player, let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
+        statusObservation = nil
         player?.pause()
         player = nil
         playbackTimeline = nil
@@ -140,11 +148,23 @@ final class AppState {
         let p = AVPlayer(url: url)
         player = p
         currentPlaybackFile = url
+        playbackDuration = 0
+        isPlaying = false
+        statusObservation = p.observe(\.timeControlStatus, options: [.initial, .new]) { p, _ in
+            let playing = p.timeControlStatus == .playing
+            Task { @MainActor in self.isPlaying = playing }
+        }
+        Task {
+            if let d = try? await p.currentItem?.asset.load(.duration), d.seconds.isFinite {
+                self.playbackDuration = d.seconds
+            }
+        }
         // 縦横比は動画のトラックから取る（回転メタデータも考慮）
         if let track = AVURLAsset(url: url).tracks(withMediaType: .video).first {
             let size = track.naturalSize.applying(track.preferredTransform)
             let w = abs(size.width), h = abs(size.height)
             if w > 0, h > 0 { playbackAspect = w / h }
+            if track.nominalFrameRate > 0 { playbackFPS = Double(track.nominalFrameRate) }
         }
         // 波形は同じ録画の CSV から復元する（別スレッドで読む）
         Task.detached { [url] in
@@ -382,6 +402,34 @@ final class AppState {
     }
 
     func cancelImport() { importCancel.cancel() }
+
+    // MARK: - 再生操作
+
+    func togglePlayPause() {
+        guard let player else { return }
+        if isPlaying { player.pause() } else {
+            // 末尾で止まっていたら先頭から
+            if playbackDuration > 0, playbackSeconds >= playbackDuration - 0.05 {
+                player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+            player.play()
+        }
+    }
+
+    /// 秒で指定した位置へ移動する（シークバー用）
+    func seek(to seconds: Double) {
+        guard let player else { return }
+        let t = min(max(0, seconds), max(0, playbackDuration))
+        playbackSeconds = t
+        player.seek(to: CMTime(seconds: t, preferredTimescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// コマ送り（正で進む，負で戻る）
+    func step(frames: Int) {
+        guard let player else { return }
+        player.pause()
+        seek(to: playbackSeconds + Double(frames) / playbackFPS)
+    }
 
     private func finishImport(_ result: Result<VideoImporter.Result, Error>) {
         pipeline?.setCameraPaused(false)

@@ -21,11 +21,45 @@ struct ContentView: View {
             cameraSection
                 .frame(height: videoHeight)
             controlButtons
+            if state.playbackURL != nil {
+                transportBar
+            }
             resizeHandle
             graphSection
                 .frame(minHeight: 200)
         }
         .frame(minWidth: 900, minHeight: 600)
+    }
+
+    /// 再生バー：再生 / 一時停止，コマ送り，シークバー，時刻。映像を非表示にしていても操作できる
+    private var transportBar: some View {
+        HStack(spacing: 12) {
+            Button { state.step(frames: -1) } label: { Image(systemName: "backward.frame") }
+                .help("1 フレーム戻る")
+            Button { state.togglePlayPause() } label: {
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 20)
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .help("再生 / 一時停止（スペース）")
+            Button { state.step(frames: 1) } label: { Image(systemName: "forward.frame") }
+                .help("1 フレーム進む")
+            Text(Self.timeString(state.playbackSeconds)).monospacedDigit()
+            Slider(value: Binding(get: { state.playbackSeconds },
+                                  set: { state.seek(to: $0) }),
+                   in: 0...max(0.001, state.playbackDuration))
+            Text(Self.timeString(state.playbackDuration)).monospacedDigit()
+        }
+        .font(.title3)
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor))
+    }
+
+    private static func timeString(_ s: Double) -> String {
+        let t = max(0, s)
+        let m = Int(t) / 60, sec = Int(t) % 60, cs = Int((t - floor(t)) * 100)
+        return String(format: "%d:%02d.%02d", m, sec, cs)
     }
 
     /// 映像とグラフの間の仕切り。上下にドラッグすると映像の高さが変わる。
