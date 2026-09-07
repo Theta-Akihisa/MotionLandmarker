@@ -32,26 +32,33 @@ struct ContentView: View {
     }
 
     /// 再生バー：再生 / 一時停止，コマ送り，シークバー，時刻。映像を非表示にしていても操作できる
+    /// チェックボックス列の幅（グラフ表示部分と再生バーの左端を揃えるため）
+    private let checkboxColumnWidth: CGFloat = 270
+
     private var transportBar: some View {
-        HStack(spacing: 12) {
-            Button { state.step(frames: -1) } label: { Image(systemName: "backward.frame") }
-                .help("1 フレーム戻る")
-            Button { state.togglePlayPause() } label: {
-                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 20)
+        HStack(spacing: 0) {
+            // 左はチェックボックス列と同じ幅を空け，バーはグラフ表示部分の幅に合わせる
+            Color.clear.frame(width: checkboxColumnWidth + 1)
+            HStack(spacing: 14) {
+                Button { state.step(frames: -1) } label: { Image(systemName: "backward.frame") }
+                    .help("1 フレーム戻る")
+                Button { state.togglePlayPause() } label: {
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 28)
+                }
+                .keyboardShortcut(.space, modifiers: [])
+                .help("再生 / 一時停止（スペース）")
+                Button { state.step(frames: 1) } label: { Image(systemName: "forward.frame") }
+                    .help("1 フレーム進む")
+                Text(Self.timeString(state.playbackSeconds)).monospacedDigit().font(.title3)
+                Slider(value: Binding(get: { state.playbackSeconds },
+                                      set: { state.seek(to: $0) }),
+                       in: 0...max(0.001, state.playbackDuration))
+                Text(Self.timeString(state.playbackDuration)).monospacedDigit().font(.title3)
             }
-            .keyboardShortcut(.space, modifiers: [])
-            .help("再生 / 一時停止（スペース）")
-            Button { state.step(frames: 1) } label: { Image(systemName: "forward.frame") }
-                .help("1 フレーム進む")
-            Text(Self.timeString(state.playbackSeconds)).monospacedDigit()
-            Slider(value: Binding(get: { state.playbackSeconds },
-                                  set: { state.seek(to: $0) }),
-                   in: 0...max(0.001, state.playbackDuration))
-            Text(Self.timeString(state.playbackDuration)).monospacedDigit()
+            .font(.system(size: 26))
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 16)
         }
-        .font(.title3)
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color(NSColor.controlBackgroundColor))
     }
@@ -346,7 +353,7 @@ struct ContentView: View {
                     .toggleStyle(.checkbox)
                     .padding(12)
                 }
-                .frame(width: 270)
+                .frame(width: checkboxColumnWidth)
                 Divider()
                 ScrollView {
                     // 再生中は動画の再生位置に合わせて録画の波形を出す。それ以外はライブの波形
