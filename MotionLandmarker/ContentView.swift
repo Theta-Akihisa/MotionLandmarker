@@ -37,27 +37,29 @@ struct ContentView: View {
 
     private var transportBar: some View {
         HStack(spacing: 0) {
-            // 左はチェックボックス列と同じ幅を空け，バーはグラフ表示部分の幅に合わせる
-            Color.clear.frame(width: checkboxColumnWidth + 1)
-            HStack(spacing: 14) {
+            // 左：チェックボックス列と同じ幅に，ボタンと時刻をまとめる
+            HStack(spacing: 10) {
                 Button { state.step(frames: -1) } label: { Image(systemName: "backward.frame") }
                     .help("1 フレーム戻る")
                 Button { state.togglePlayPause() } label: {
-                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 28)
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 22)
                 }
                 .keyboardShortcut(.space, modifiers: [])
                 .help("再生 / 一時停止（スペース）")
                 Button { state.step(frames: 1) } label: { Image(systemName: "forward.frame") }
                     .help("1 フレーム進む")
-                Text(Self.timeString(state.playbackSeconds)).monospacedDigit().font(.title3)
-                Slider(value: Binding(get: { state.playbackSeconds },
-                                      set: { state.seek(to: $0) }),
-                       in: 0...max(0.001, state.playbackDuration))
-                Text(Self.timeString(state.playbackDuration)).monospacedDigit().font(.title3)
+                Text("\(Self.timeString(state.playbackSeconds)) / \(Self.timeString(state.playbackDuration))")
+                    .font(.callout).monospacedDigit().lineLimit(1)
             }
-            .font(.system(size: 26))
+            .font(.title3)
             .buttonStyle(.borderless)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
+            .frame(width: checkboxColumnWidth + 1, alignment: .leading)
+            // 右：シークバーをグラフ表示部分と同じ横幅（グラフの枠と同じ余白）にする
+            Slider(value: Binding(get: { state.playbackSeconds },
+                                  set: { state.seek(to: $0) }),
+                   in: 0...max(0.001, state.playbackDuration))
+                .padding(.horizontal, 16)
         }
         .padding(.vertical, 8)
         .background(Color(NSColor.controlBackgroundColor))
