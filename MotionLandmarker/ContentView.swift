@@ -38,20 +38,24 @@ struct ContentView: View {
     private var transportBar: some View {
         HStack(spacing: 0) {
             // 左：チェックボックス列と同じ幅に，ボタンと時刻をまとめる
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 Button { state.step(frames: -1) } label: { Image(systemName: "backward.frame") }
                     .help("1 フレーム戻る")
                 Button { state.togglePlayPause() } label: {
-                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 22)
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").frame(width: 28)
                 }
                 .keyboardShortcut(.space, modifiers: [])
                 .help("再生 / 一時停止（スペース）")
                 Button { state.step(frames: 1) } label: { Image(systemName: "forward.frame") }
                     .help("1 フレーム進む")
-                Text("\(Self.timeString(state.playbackSeconds)) / \(Self.timeString(state.playbackDuration))")
-                    .font(.callout).monospacedDigit().lineLimit(1)
+                // 時刻は 2 段にして列幅（270px）に収める
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(Self.timeString(state.playbackSeconds))
+                    Text(Self.timeString(state.playbackDuration)).foregroundStyle(.secondary)
+                }
+                .font(.title3).monospacedDigit()
             }
-            .font(.title3)
+            .font(.system(size: 26))
             .buttonStyle(.borderless)
             .padding(.horizontal, 12)
             .frame(width: checkboxColumnWidth + 1, alignment: .leading)
