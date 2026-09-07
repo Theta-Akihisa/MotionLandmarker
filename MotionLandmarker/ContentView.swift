@@ -64,11 +64,23 @@ struct ContentView: View {
     private var cameraSection: some View {
         VStack(spacing: 6) {
             HStack(spacing: 16) {
-                Text("表示").foregroundStyle(.secondary)
-                Toggle("顔", isOn: $state.drawOptions.face)
-                Toggle("体（pose）", isOn: $state.drawOptions.pose)
-                Toggle("左手", isOn: $state.drawOptions.leftHand)
-                Toggle("右手", isOn: $state.drawOptions.rightHand)
+                if state.playbackURL != nil {
+                    Text("再生映像").foregroundStyle(.secondary)
+                    Picker("再生映像", selection: $state.playbackVariant) {
+                        ForEach(AppState.PlaybackVariant.allCases.filter { state.availableVariants.contains($0) }) { v in
+                            Text(v.label).tag(v)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 360)
+                } else {
+                    Text("表示").foregroundStyle(.secondary)
+                    Toggle("顔", isOn: $state.drawOptions.face)
+                    Toggle("体（pose）", isOn: $state.drawOptions.pose)
+                    Toggle("左手", isOn: $state.drawOptions.leftHand)
+                    Toggle("右手", isOn: $state.drawOptions.rightHand)
+                }
                 Spacer()
                 sidecarStatus
                 Spacer()
@@ -86,7 +98,10 @@ struct ContentView: View {
             .padding(.top, 8)
 
             ZStack {
-                if let url = state.playbackURL {
+                if state.playbackURL != nil, state.playbackVariant == .hidden {
+                    // 映像を出さずに波形だけ再生する
+                    Text("映像は非表示（波形のみ再生中）").foregroundStyle(.secondary)
+                } else if state.playbackURL != nil {
                     // 録画の再生（カメラ映像と同じ領域に表示）
                     PlayerView(player: state.player)
                         .aspectRatio(state.playbackAspect, contentMode: .fit)
@@ -120,7 +135,8 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(state.displayImage == nil ? Color(cgColor: SkeletonRenderer.sketchBackground) : .clear)
+            .background(state.displayImage == nil || (state.playbackURL != nil && state.playbackVariant == .hidden)
+                        ? Color(cgColor: SkeletonRenderer.sketchBackground) : .clear)
             .overlay(alignment: .bottomLeading) {
                 if !state.camera.currentCameraName.isEmpty {
                     Text(state.camera.currentCameraName)

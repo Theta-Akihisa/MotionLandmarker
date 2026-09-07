@@ -54,6 +54,61 @@ final class AppState {
     var playbackSeconds: Double = 0
     /// 再生中の動画の縦横比（幅 / 高さ）。動画の実サイズから取る
     var playbackAspect: CGFloat = 16.0 / 9.0
+
+    /// 再生する映像の種類（同じ録画の raw / skeleton / overlay を切り替える）
+    enum PlaybackVariant: String, CaseIterable, Identifiable {
+        case raw, skeleton, overlay, hidden
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .raw: return "生映像"
+            case .skeleton: return "skeleton"
+            case .overlay: return "overlay"
+            case .hidden: return "非表示"
+            }
+        }
+        /// 出力フォルダ名とファイル名の接尾辞
+        var folder: String { "video_\(rawValue)" }
+        var suffix: String { "_\(rawValue)" }
+    }
+    var playbackVariant: PlaybackVariant = .overlay {
+        didSet { if oldValue != playbackVariant { switchPlaybackVariant(from: oldValue) } }
+    }
+    /// 再生中の録画に存在する映像の種類
+    var availableVariants: Set<PlaybackVariant> = []
+
+    /// 動画 URL から（stem, 出力ルート）を取り出す。録画の配置（video_xxx/{stem}_xxx.mp4）でなければ nil
+    private static func recordingParts(of url: URL) -> (stem: String, root: URL, variant: PlaybackVariant)? {
+        let name = url.deletingPathExtension().lastPathComponent
+        for v in [PlaybackVariant.raw, .skeleton, .overlay] where name.hasSuffix(v.suffix) {
+            let stem = String(name.dropLast(v.suffix.count))
+            let root = url.deletingLastPathComponent().deletingLastPathComponent()
+            return (stem, root, v)
+        }
+        return nil
+    }
+
+    private static func variantURL(_ v: PlaybackVariant, stem: String, root: URL) -> URL {
+        root.appendingPathComponent(v.folder).appendingPathComponent("\(stem)\(v.suffix).mp4")
+    }
+
+    /// 再生中の動画を別の種類（同じ録画）に差し替える。再生位置と再生状態は保つ
+    private func switchPlaybackVariant(from old: PlaybackVariant) {
+        guard let url = playbackURL, let player else { return }
+        if playbackVariant == .hidden { return }          // 表示だけ消す（再生は続ける）
+        guard let parts = Self.recordingParts(of: url) else { return }
+        let target = Self.variantURL(playbackVariant, stem: parts.stem, root: parts.root)
+        guard FileManager.default.fileExists(atPath: target.path) else { return }
+        guard currentPlaybackFile != target else { return }   // 非表示から戻しただけなら差し替え不要
+        let time = player.currentTime()
+        let wasPlaying = player.rate > 0
+        player.replaceCurrentItem(with: AVPlayerItem(url: target))
+        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        if wasPlaying { player.play() }
+        currentPlaybackFile = target
+    }
+    /// 実際にプレイヤーに入っているファイル（playbackURL は選択時の URL のまま保つ）
+    private(set) var currentPlaybackFile: URL?
     var playbackHasWaveform: Bool { !(playbackTimeline?.isEmpty ?? true) }
 
     /// 動画ファイルの処理中か
@@ -71,8 +126,20 @@ final class AppState {
         playbackTimeline = nil
         playbackSeconds = 0
         guard let url = playbackURL else { return }
+        // 同じ録画にある映像の種類を調べ，選んだファイルの種類を初期値にする
+        if let parts = Self.recordingParts(of: url) {
+            availableVariants = Set([PlaybackVariant.raw, .skeleton, .overlay].filter {
+                FileManager.default.fileExists(atPath: Self.variantURL($0, stem: parts.stem, root: parts.root).path)
+            }).union([.hidden])
+            if playbackVariant == .hidden || !availableVariants.contains(playbackVariant) {
+                playbackVariant = parts.variant   // didSet は URL が同じなので何もしない
+            }
+        } else {
+            availableVariants = [.hidden]
+        }
         let p = AVPlayer(url: url)
         player = p
+        currentPlaybackFile = url
         // 縦横比は動画のトラックから取る（回転メタデータも考慮）
         if let track = AVURLAsset(url: url).tracks(withMediaType: .video).first {
             let size = track.naturalSize.applying(track.preferredTransform)
