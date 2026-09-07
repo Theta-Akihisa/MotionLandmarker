@@ -123,10 +123,21 @@ struct ContentView: View {
                     .frame(width: 360)
                 } else {
                     Text("表示").foregroundStyle(.secondary)
-                    Toggle("顔", isOn: $state.drawOptions.face)
-                    Toggle("体（pose）", isOn: $state.drawOptions.pose)
-                    Toggle("左手", isOn: $state.drawOptions.leftHand)
-                    Toggle("右手", isOn: $state.drawOptions.rightHand)
+                    Picker("表示", selection: $state.liveStyle) {
+                        Text("生映像").tag(LiveStyle.raw)
+                        Text("skeleton").tag(LiveStyle.skeleton)
+                        Text("overlay").tag(LiveStyle.overlay)
+                        Text("非表示").tag(LiveStyle.hidden)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 360)
+                    if state.liveStyle.showsLandmarks {
+                        Toggle("顔", isOn: $state.drawOptions.face)
+                        Toggle("体（pose）", isOn: $state.drawOptions.pose)
+                        Toggle("左手", isOn: $state.drawOptions.leftHand)
+                        Toggle("右手", isOn: $state.drawOptions.rightHand)
+                    }
                 }
                 Spacer()
                 sidecarStatus
@@ -148,6 +159,8 @@ struct ContentView: View {
                 if state.playbackURL != nil, state.playbackVariant == .hidden {
                     // 映像を出さずに波形だけ再生する
                     Text("映像は非表示（波形のみ再生中）").foregroundStyle(.secondary)
+                } else if state.playbackURL == nil, state.liveStyle == .hidden {
+                    Text("映像は非表示（推論と波形は動作中）").foregroundStyle(.secondary)
                 } else if state.playbackURL != nil {
                     // 録画の再生（カメラ映像と同じ領域に表示）
                     PlayerView(player: state.player)
@@ -183,6 +196,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(state.displayImage == nil || (state.playbackURL != nil && state.playbackVariant == .hidden)
+                        || (state.playbackURL == nil && state.liveStyle == .hidden)
                         ? Color(cgColor: SkeletonRenderer.sketchBackground) : .clear)
             .overlay(alignment: .bottomLeading) {
                 if !state.camera.currentCameraName.isEmpty {

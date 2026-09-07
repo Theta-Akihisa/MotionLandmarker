@@ -17,6 +17,13 @@ nonisolated struct DrawOptions: Equatable, Sendable {
     static let all = DrawOptions()
 }
 
+/// ライブ表示の見せ方（録画の再生と同じ 4 種類）。録画される内容には影響しない。
+nonisolated enum LiveStyle: String, CaseIterable, Sendable {
+    case raw, skeleton, overlay, hidden
+    var showsCamera: Bool { self == .raw || self == .overlay }
+    var showsLandmarks: Bool { self == .skeleton || self == .overlay }
+}
+
 /// 映像のランドマークとグラフの線で共通に使う色。部位ごとに 1 色を割り当てる。
 /// グラフ側は SwiftUI の Color に変換して使う（ContentView 参照）。
 nonisolated enum Palette {

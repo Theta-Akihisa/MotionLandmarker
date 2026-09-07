@@ -21,6 +21,14 @@ final class AppState {
     var drawOptions = DrawOptions() {
         didSet { pipeline?.setDrawOptions(drawOptions) }
     }
+    /// ライブ表示の見せ方（生映像 / skeleton / overlay / 非表示）。次回起動時も保持する
+    var liveStyle: LiveStyle = LiveStyle(rawValue: UserDefaults.standard.string(forKey: "liveStyle") ?? "") ?? .overlay {
+        didSet {
+            UserDefaults.standard.set(liveStyle.rawValue, forKey: "liveStyle")
+            pipeline?.setLiveStyle(liveStyle)
+            if liveStyle == .hidden { displayImage = nil }
+        }
+    }
     /// 波形の表示モード（上半身 / 手腕）。次回起動時も保持する。
     var metricMode: MetricMode = MetricMode(rawValue: UserDefaults.standard.string(forKey: "metricMode") ?? "") ?? .upperBody {
         didSet { UserDefaults.standard.set(metricMode.rawValue, forKey: "metricMode") }
@@ -271,6 +279,7 @@ final class AppState {
         let client = LandmarkerClient()
         let pipeline = LandmarkPipeline(client: client)
         pipeline.setDrawOptions(drawOptions)
+        pipeline.setLiveStyle(liveStyle)
         client.onReady = { Task { @MainActor in self.sidecarState = .ready } }
         client.onExit = { code, log in
             Task { @MainActor in
@@ -293,7 +302,7 @@ final class AppState {
     }
 
     private func receive(image: CGImage?, metrics: [MetricKind: Double], recorded: Int) {
-        displayImage = image
+        if liveStyle != .hidden { displayImage = image }
         recordedFrames = recorded
         liveHistory.push(metrics)
         historyDirty = true

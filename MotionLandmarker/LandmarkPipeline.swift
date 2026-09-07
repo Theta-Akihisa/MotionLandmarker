@@ -30,6 +30,7 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
     private var previousFrame: LandmarkFrame?
     private var frameSize = CGSize(width: 1280, height: 720)
     private var drawOptions = DrawOptions()
+    private var liveStyle = LiveStyle.overlay
     /// サイドカーは単調増加のタイムスタンプを要求する。カメラと動画ファイルで時刻の基準が違うため，
     /// 送信時刻には必要に応じてオフセットを足し，結果を受け取るときに元の時刻へ戻す。
     private var wireOffset = 0
@@ -43,6 +44,7 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
     }
 
     func setDrawOptions(_ o: DrawOptions) { queue.async { self.drawOptions = o } }
+    func setLiveStyle(_ st: LiveStyle) { queue.async { self.liveStyle = st } }
 
     var currentFrameSize: CGSize { queue.sync { frameSize } }
     var isRecording: Bool { queue.sync { recorder != nil } }
@@ -97,7 +99,18 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
             let background = entry?.image
             let size = background.map { CGSize(width: $0.width, height: $0.height) } ?? frameSize
             frameSize = size
-            let image = SkeletonRenderer.image(frame, background: background, size: size, options: drawOptions)
+            // 表示用の画像（見せ方に応じて背景・ランドマークを出し分ける。録画は常に全部）
+            let image: CGImage?
+            switch liveStyle {
+            case .hidden:
+                image = nil
+            case .raw:
+                image = SkeletonRenderer.image(nil, background: background, size: size, options: drawOptions)
+            case .skeleton:
+                image = SkeletonRenderer.image(frame, background: nil, size: size, options: drawOptions)
+            case .overlay:
+                image = SkeletonRenderer.image(frame, background: background, size: size, options: drawOptions)
+            }
             let metrics = MotionMetrics.compute(frame, previous: previousFrame)
             previousFrame = frame
             recorder?.append(frame, background: background, metrics: metrics)
