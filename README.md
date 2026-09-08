@@ -97,6 +97,9 @@ Xcode の自動署名でビルドしている限り，署名は安定してい�
 | 1人 | Holistic Landmarker（1つのモデルで顔・手・体） | 検出した1人 |
 | 複数人 | Pose（heavy）/ Hand / Face Landmarker を組み合わせ（最大4人）．手と顔は pose の手首・鼻との距離で各人物に割り当てる | 描画は全員．グラフと face / hand / pose の CSV / JSON は画面中央に最も近い人（肩の中点が画面中央に近い人） |
 
+後ろにいる人（肩幅が画面幅の 10% 未満）と隠れている人（鼻・肩・肘・手首の visibility の平均が 0.5 未満）は
+検出対象から除きます．しきい値は `landmarker/landmarker.py` の `MIN_SHOULDER_WIDTH` / `MIN_UPPER_VISIBILITY` で変えられます．
+
 複数人モードでは他の人物を半透明で描き，`json/{stem}/{stem}_people.json` に全員分のランドマーク（先頭が中央の人物）も保存します．
 複数人モードは3つのモデルを回すため 1人モードより遅く（実測で約 20 fps．1人モードは約 35 fps），
 初回の切り替え時に3つのモデル（合計約 45 MB）をダウンロードします．

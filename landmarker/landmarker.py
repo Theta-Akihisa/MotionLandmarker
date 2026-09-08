@@ -35,6 +35,12 @@ MODELS = {
     "face_landmarker.task": MODEL_BASE + "face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
 }
 MAX_PEOPLE = 4
+# 複数人モードで「後ろにいる人」「隠れている人」を除くためのしきい値
+# 肩幅（画面幅に対する比）がこれより小さい人は遠くにいるとみなして除く
+MIN_SHOULDER_WIDTH = 0.10
+# 上半身の主要点（鼻・肩・肘・手首）の visibility の平均がこれより低い人は隠れているとみなして除く
+MIN_UPPER_VISIBILITY = 0.5
+UPPER_BODY_IDX = [0, 11, 12, 13, 14, 15, 16]
 
 MODE_SINGLE = 1
 MODE_MULTI = 2
@@ -110,6 +116,11 @@ class MultiDetector:
 
         people = []
         for i, pose in enumerate(pr.pose_landmarks):
+            # 後ろにいる人（小さく写る）と隠れている人（visibility が低い）は除く
+            shoulder = math.hypot(pose[11].x - pose[12].x, pose[11].y - pose[12].y)
+            vis = sum((pose[j].visibility or 0.0) for j in UPPER_BODY_IDX) / len(UPPER_BODY_IDX)
+            if shoulder < MIN_SHOULDER_WIDTH or vis < MIN_UPPER_VISIBILITY:
+                continue
             p = empty_person()
             p["pose"] = norm(pose, True)
             p["pose_world"] = norm(pr.pose_world_landmarks[i], False) if i < len(pr.pose_world_landmarks) else []
