@@ -12,8 +12,8 @@ Protocol (binary stdin / text stdout):
            pose / face / lh / rh は「画面中央に最も近い人物」（複数人モード）または検出した1人（1人モード）．
   起動時に {"ready": true}，モード切り替え完了時に {"mode": 1|2} を出す．
 
-1人モードは Holistic Landmarker，複数人モードは Pose / Hand / Face Landmarker を組み合わせ，
-手と顔を pose の手首・鼻との距離で各人物に割り当てる．
+1人モードは Holistic Landmarker．複数人モードは YOLO（yolo11n）で人物の枠を検出・追跡し，
+人物ごとに切り出して Holistic Landmarker を適用する（出力形式は1人モードと同じ）．
 """
 import json
 import math
@@ -30,17 +30,9 @@ from mediapipe.tasks.python import BaseOptions, vision
 MODEL_BASE = "https://storage.googleapis.com/mediapipe-models/"
 MODELS = {
     "holistic_landmarker.task": MODEL_BASE + "holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
-    "pose_landmarker_heavy.task": MODEL_BASE + "pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
-    "hand_landmarker.task": MODEL_BASE + "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
-    "face_landmarker.task": MODEL_BASE + "face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
 }
+# YOLO の重み（yolo11n.pt）は ultralytics が同じ場所へ自動でダウンロードする
 MAX_PEOPLE = 4
-# 複数人モードで「後ろにいる人」「隠れている人」を除くためのしきい値
-# 肩幅（画面幅に対する比）がこれより小さい人は遠くにいるとみなして除く
-MIN_SHOULDER_WIDTH = 0.10
-# 上半身の主要点（鼻・肩・肘・手首）の visibility の平均がこれより低い人は隠れているとみなして除く
-MIN_UPPER_VISIBILITY = 0.5
-UPPER_BODY_IDX = [0, 11, 12, 13, 14, 15, 16]
 
 MODE_SINGLE = 1
 MODE_MULTI = 2
@@ -53,10 +45,10 @@ def model_path(name: str) -> str:
     support = os.path.expanduser("~/Library/Application Support/MotionLandmarker/models")
     os.makedirs(support, exist_ok=True)
     path = os.path.join(support, name)
-    if not os.path.exists(path):
+    if not os.path.exists(path) and name in MODELS:
         print(f"downloading {name}...", file=sys.stderr, flush=True)
         urllib.request.urlretrieve(MODELS[name], path)
-    return path
+    return path   # MODELS に無いもの（YOLO の重み）は呼び出し側がダウンロードする
 
 
 def norm(lms, with_vis: bool):
@@ -93,82 +85,116 @@ class SingleDetector:
 
 
 class MultiDetector:
-    """Pose / Hand / Face Landmarker を組み合わせて複数人を検出する"""
+    """YOLO で人物の枠を検出し，人物ごとに切り出して Holistic Landmarker を適用する（複数人）。
+
+    ランドマークの精度と出力形式は 1 人モードと同じ（33 点 + ワールド座標 + 顔 478 点 + 手 21 点）。
+    Holistic は VIDEO モードで前フレームの状態を使うため，YOLO の追跡 ID ごとに別のインスタンスを持つ。
+    """
+
+    # 切り出し枠の余白（枠の幅・高さに対する比）
+    CROP_MARGIN = 0.25
+    # YOLO の信頼度がこれ未満の枠は無視
+    MIN_CONF = 0.4
+    # 枠の高さが画面の高さに対してこれ未満の人は「後ろにいる」とみなして除く
+    MIN_BOX_HEIGHT = 0.25
+    # 使わなくなった追跡 ID の Holistic を捨てるまでのフレーム数
+    STALE_FRAMES = 30
+    # Holistic（VIDEO モード）は入力サイズが変わると落ちるため，切り出しはこの正方形に
+    # 縦横比を保って収める（余白は黒）
+    CANVAS = 512
 
     def __init__(self):
-        self.pose = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=model_path("pose_landmarker_heavy.task")),
-            running_mode=vision.RunningMode.VIDEO, num_poses=MAX_PEOPLE,
-        ))
-        self.hand = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=model_path("hand_landmarker.task")),
-            running_mode=vision.RunningMode.VIDEO, num_hands=MAX_PEOPLE * 2,
-        ))
-        self.face = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=model_path("face_landmarker.task")),
-            running_mode=vision.RunningMode.VIDEO, num_faces=MAX_PEOPLE,
-        ))
+        from ultralytics import YOLO
+        import torch
+        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        self.yolo = YOLO(model_path("yolo11n.pt"))
+        self.holistics = {}   # track_id -> (HolisticLandmarker, last_seen_frame)
+        self.frame_no = 0
+
+    def _holistic(self, track_id):
+        entry = self.holistics.get(track_id)
+        if entry is None:
+            lm = vision.HolisticLandmarker.create_from_options(vision.HolisticLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=model_path("holistic_landmarker.task")),
+                running_mode=vision.RunningMode.VIDEO,
+            ))
+            entry = [lm, self.frame_no]
+            self.holistics[track_id] = entry
+        entry[1] = self.frame_no
+        return entry[0]
+
+    def _drop_stale(self):
+        for tid in [t for t, (_, seen) in self.holistics.items() if self.frame_no - seen > self.STALE_FRAMES]:
+            self.holistics.pop(tid)[0].close()
 
     def detect(self, image, ts):
-        pr = self.pose.detect_for_video(image, ts)
-        hr = self.hand.detect_for_video(image, ts)
-        fr = self.face.detect_for_video(image, ts)
-
+        self.frame_no += 1
+        rgb = image.numpy_view()
+        h, w = rgb.shape[:2]
+        # YOLO の追跡（person クラスのみ）。BGR 入力を想定しているので変換する
+        res = self.yolo.track(rgb[:, :, ::-1], persist=True, classes=[0], conf=self.MIN_CONF,
+                              device=self.device, verbose=False, imgsz=640)[0]
         people = []
-        for i, pose in enumerate(pr.pose_landmarks):
-            # 後ろにいる人（小さく写る）と隠れている人（visibility が低い）は除く
-            shoulder = math.hypot(pose[11].x - pose[12].x, pose[11].y - pose[12].y)
-            vis = sum((pose[j].visibility or 0.0) for j in UPPER_BODY_IDX) / len(UPPER_BODY_IDX)
-            if shoulder < MIN_SHOULDER_WIDTH or vis < MIN_UPPER_VISIBILITY:
-                continue
-            p = empty_person()
-            p["pose"] = norm(pose, True)
-            p["pose_world"] = norm(pr.pose_world_landmarks[i], False) if i < len(pr.pose_world_landmarks) else []
-            people.append(p)
-
-        # 手：handedness（本人の左右）ごとに，pose の同じ側の手首（左 15 / 右 16）に最も近い人物へ割り当てる
-        for hand, handed in zip(hr.hand_landmarks, hr.handedness):
-            label = handed[0].category_name if handed else "Right"
-            key, wrist_idx = ("lh", 15) if label == "Left" else ("rh", 16)
-            wx, wy = hand[0].x, hand[0].y
-            best, best_d = None, 0.15  # 手のひら数個分より離れていれば割り当てない
-            for p in people:
-                if p[key]:
+        if res.boxes is not None and len(res.boxes) > 0:
+            boxes = res.boxes.xyxy.cpu().numpy()
+            ids = res.boxes.id.cpu().numpy().astype(int) if res.boxes.id is not None else range(len(boxes))
+            confs = res.boxes.conf.cpu().numpy()
+            for (x1, y1, x2, y2), tid, conf in zip(boxes, ids, confs):
+                bh = (y2 - y1) / h
+                if bh < self.MIN_BOX_HEIGHT:
                     continue
-                pw = p["pose"][wrist_idx]
-                d = math.hypot(pw[0] - wx, pw[1] - wy)
-                if d < best_d:
-                    best, best_d = p, d
-            if best is not None:
-                best[key] = norm(hand, False)
-
-        # 顔：鼻先（face 1）と pose の鼻（0）が最も近い人物へ
-        for face in fr.face_landmarks:
-            nx, ny = face[1].x, face[1].y
-            best, best_d = None, 0.15
-            for p in people:
-                if p["face"]:
+                # 余白付きで切り出す
+                mw, mh = (x2 - x1) * self.CROP_MARGIN, (y2 - y1) * self.CROP_MARGIN
+                cx1, cy1 = int(max(0, x1 - mw)), int(max(0, y1 - mh))
+                cx2, cy2 = int(min(w, x2 + mw)), int(min(h, y2 + mh))
+                if cx2 - cx1 < 32 or cy2 - cy1 < 32:
                     continue
-                pn = p["pose"][0]
-                d = math.hypot(pn[0] - nx, pn[1] - ny)
-                if d < best_d:
-                    best, best_d = p, d
-            if best is not None:
-                best["face"] = norm(face, False)
+                crop = rgb[cy1:cy2, cx1:cx2]
+                ch, cw = crop.shape[:2]
+                scale = self.CANVAS / max(cw, ch)
+                rw, rh = max(1, int(round(cw * scale))), max(1, int(round(ch * scale)))
+                canvas = np.zeros((self.CANVAS, self.CANVAS, 3), dtype=np.uint8)
+                canvas[:rh, :rw] = cv2.resize(crop, (rw, rh), interpolation=cv2.INTER_AREA)
+                r = self._holistic(int(tid)).detect_for_video(
+                    mp.Image(image_format=mp.ImageFormat.SRGB, data=canvas), ts)
+                if not r.pose_landmarks:
+                    continue
+                # キャンバスの正規化座標 → 元画像の正規化座標
+                #   キャンバス px = l.x * CANVAS，切り出し px = / scale，元画像 px = + cx1，正規化 = / w
+                kx = self.CANVAS / scale / w
+                ky = self.CANVAS / scale / h
+                ox, oy = cx1 / w, cy1 / h
+
+                def to_full(lms, with_vis):
+                    # z は x と同じ尺度（キャンバス幅基準）なので同じ比で直す
+                    if with_vis:
+                        return [[ox + l.x * kx, oy + l.y * ky, l.z * kx, l.visibility or 0.0] for l in lms]
+                    return [[ox + l.x * kx, oy + l.y * ky, l.z * kx] for l in lms]
+
+                p = empty_person()
+                p["pose"] = to_full(r.pose_landmarks, True)
+                p["pose_world"] = norm(r.pose_world_landmarks, False)
+                p["face"] = to_full(r.face_landmarks, False)
+                p["lh"] = to_full(r.left_hand_landmarks, False)
+                p["rh"] = to_full(r.right_hand_landmarks, False)
+                p["_cx"] = (x1 + x2) / 2 / w
+                people.append(p)
+        self._drop_stale()
 
         if not people:
             return empty_person(), []
-        # 中央の人物：肩の中点（11, 12）の x が 0.5 に最も近い人
-        def center_dist(p):
-            a, b = p["pose"][11], p["pose"][12]
-            return abs((a[0] + b[0]) / 2 - 0.5)
-        people.sort(key=center_dist)
+        # 中央の人物：枠の中心 x が 0.5 に最も近い人
+        people.sort(key=lambda p: abs(p["_cx"] - 0.5))
+        for p in people:
+            p.pop("_cx", None)
+        if len(people) > MAX_PEOPLE:
+            people = people[:MAX_PEOPLE]
         return people[0], people[1:]
 
     def close(self):
-        self.pose.close()
-        self.hand.close()
-        self.face.close()
+        for lm, _ in self.holistics.values():
+            lm.close()
+        self.holistics.clear()
 
 
 def create_detector(mode):
@@ -176,9 +202,12 @@ def create_detector(mode):
 
 
 def main() -> None:
+    # プロトコル用の標準出力を確保し，ライブラリ（ultralytics など）の print は標準エラーへ逃がす
+    out = sys.stdout
+    sys.stdout = sys.stderr
+    os.environ.setdefault("YOLO_VERBOSE", "False")
     mode = MODE_SINGLE
     detector = create_detector(mode)
-    out = sys.stdout
     stdin = sys.stdin.buffer
     out.write(json.dumps({"ready": True}) + "\n")
     out.flush()
