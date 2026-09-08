@@ -155,6 +155,8 @@ final class AppState {
     @ObservationIgnored private let importCancel = CancelFlag()
 
     private func setUpPlayback() {
+        // 再生中はカメラのキャプチャを止めて負荷を下げる。Live に戻すと再開する
+        if playbackURL != nil { camera.stop() } else if !isImporting { camera.resume() }
         if let player, let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         statusObservation = nil
@@ -433,6 +435,7 @@ final class AppState {
         importProgress = (0, 0)
         statusMessage = nil
         pipeline.setCameraPaused(true)
+        camera.stop()   // 動画処理中もカメラを止める
         let outputRoot = self.outputRoot
         let multi = personMode == .multi
         Task.detached { [self] in
@@ -481,6 +484,7 @@ final class AppState {
     private func finishImport(_ result: Result<VideoImporter.Result, Error>) {
         pipeline?.setCameraPaused(false)
         isImporting = false
+        if playbackURL == nil { camera.resume() }
         switch result {
         case .success(let r):
             var msg = "\(importName) を処理しました（\(r.frames) フレーム）→ \(outputRoot.path)"

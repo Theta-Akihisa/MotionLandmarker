@@ -44,8 +44,17 @@ class CameraManager {
         Task { await configureSession() }
     }
 
+    /// キャプチャを止める（再生中や動画処理中に負荷を下げるため）。設定は保持し，resume で再開できる
     func stop() {
         sessionQueue.async { [captureSession] in captureSession.stopRunning() }
+    }
+
+    /// stop で止めたキャプチャを再開する
+    func resume() {
+        guard isCameraAvailable else { return }
+        sessionQueue.async { [captureSession] in
+            if !captureSession.isRunning { captureSession.startRunning() }
+        }
     }
 
     private func configureSession() async {
