@@ -124,6 +124,20 @@ nonisolated struct PlaybackTimeline: Sendable {
         Date(timeIntervalSince1970: Double(firstTimestamp) / 1000 + seconds)
     }
 
+    /// 動画の秒で指定した範囲のサンプルを返す（ズーム表示用）。前後に少し余裕を持たせて線が端まで届くようにする
+    func range(fromSeconds: Double, toSeconds: Double) -> (times: [Date], series: [MetricKind: [Float?]]) {
+        let fromMs = firstTimestamp + Int(fromSeconds * 1000)
+        let toMs = firstTimestamp + Int(toSeconds * 1000)
+        var lo = timestamps.firstIndex { $0 >= fromMs } ?? timestamps.count
+        var hi = timestamps.firstIndex { $0 > toMs } ?? timestamps.count
+        lo = max(0, lo - 1); hi = min(timestamps.count, hi + 1)
+        guard lo < hi else { return ([], [:]) }
+        let times = timestamps[lo..<hi].map { Date(timeIntervalSince1970: Double($0) / 1000) }
+        var series: [MetricKind: [Float?]] = [:]
+        for (k, arr) in values { series[k] = Array(arr[lo..<hi]) }
+        return (times, series)
+    }
+
     /// 全フレームの時刻（録画全体を横軸に出すとき用）
     var allTimes: [Date] { timestamps.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
 

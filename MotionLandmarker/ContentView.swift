@@ -40,6 +40,92 @@ struct ContentView: View {
     private let columnWidthRange: ClosedRange<Double> = 160...600
     private var checkboxColumnWidth: CGFloat { CGFloat(draggingColumnWidth ?? savedColumnWidth) }
 
+    /// 再生時のグラフの横軸の表示範囲（動画の秒）。nil なら全体
+    @State private var zoomRange: ClosedRange<Double>?
+    @State private var magnifyStartRange: ClosedRange<Double>?
+    @State private var graphsFrame: CGRect = .zero
+    @State private var scrollMonitor: Any?
+    /// プロット領域の左右の余白（外側 16 + 枠内 12 + 縦軸ラベル 48 + 隙間 ≈ 84 / 右 28）
+    private let plotLeftInset: CGFloat = 84
+    private let plotRightInset: CGFloat = 28
+
+    /// 表示範囲（動画の秒）。ズームしていなければ全体
+    private var visibleRange: ClosedRange<Double> {
+        zoomRange ?? 0...max(0.001, state.playbackDuration)
+    }
+
+    /// グラフ領域の x 座標（ローカル）→ 動画の秒
+    private func seconds(atX x: CGFloat) -> Double {
+        let w = max(1, graphsFrame.width - plotLeftInset - plotRightInset)
+        let f = Double(min(max((x - plotLeftInset) / w, 0), 1))
+        let r = visibleRange
+        return r.lowerBound + (r.upperBound - r.lowerBound) * f
+    }
+
+    /// `anchor` 秒を固定して `factor` 倍に拡大（>1）/ 縮小（<1）
+    private func zoom(by factor: Double, anchor: Double) {
+        let r = visibleRange
+        let full = max(0.001, state.playbackDuration)
+        var span = (r.upperBound - r.lowerBound) / factor
+        span = min(max(span, 0.2), full)          // 最小 0.2 秒，最大は全体
+        let f = (anchor - r.lowerBound) / max(0.001, r.upperBound - r.lowerBound)
+        var lower = anchor - span * f
+        lower = min(max(lower, 0), full - span)
+        zoomRange = span >= full ? nil : lower...(lower + span)
+    }
+
+    /// 表示範囲を秒数だけ左右に動かす
+    private func pan(by seconds: Double) {
+        guard let r = zoomRange else { return }
+        let full = max(0.001, state.playbackDuration)
+        let span = r.upperBound - r.lowerBound
+        let lower = min(max(r.lowerBound + seconds, 0), full - span)
+        zoomRange = lower...(lower + span)
+    }
+
+    /// 再生位置が表示範囲から外れたら範囲を追従させる
+    private func followPlayback() {
+        guard let r = zoomRange else { return }
+        let t = state.playbackSeconds
+        if t < r.lowerBound || t > r.upperBound {
+            let span = r.upperBound - r.lowerBound
+            let full = max(0.001, state.playbackDuration)
+            let lower = min(max(t, 0), max(0, full - span))
+            zoomRange = lower...(lower + span)
+        }
+    }
+
+    /// マウスホイール / トラックパッドのスクロールでズーム（上下）と移動（左右）
+    private func installScrollMonitor() {
+        guard scrollMonitor == nil else { return }
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+            guard state.playbackURL != nil, let window = event.window,
+                  let contentView = window.contentView else { return event }
+            // ウィンドウ座標（左下原点）→ 画面上の位置と graphsFrame（グローバル，左上原点）を比べる
+            let p = event.locationInWindow
+            let flippedY = contentView.bounds.height - p.y
+            let local = CGPoint(x: p.x - graphsFrame.minX, y: flippedY - graphsFrame.minY)
+            guard local.x >= 0, local.y >= 0, local.x <= graphsFrame.width, local.y <= graphsFrame.height else { return event }
+            let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
+            if abs(dy) > abs(dx) {
+                // 上下：カーソル位置を中心に拡大縮小
+                let factor = exp(Double(dy) * (event.hasPreciseScrollingDeltas ? 0.01 : 0.1))
+                zoom(by: factor, anchor: seconds(atX: local.x))
+            } else if dx != 0, zoomRange != nil {
+                // 左右：表示範囲を移動（1 画面幅 = 表示範囲の秒数）
+                let span = visibleRange.upperBound - visibleRange.lowerBound
+                let w = max(1, graphsFrame.width - plotLeftInset - plotRightInset)
+                pan(by: -Double(dx) / Double(w) * span)
+            }
+            return nil
+        }
+    }
+
+    private func removeScrollMonitor() {
+        if let m = scrollMonitor { NSEvent.removeMonitor(m) }
+        scrollMonitor = nil
+    }
+
     /// チェックボックス列とグラフの境目。左右にドラッグするとグラフの横幅が変わる
     private var columnResizeHandle: some View {
         ZStack {
@@ -403,6 +489,16 @@ struct ContentView: View {
                      : "肘から手までの動き（前腕の角度・手の向き・手の開き・手首の速度）")
                     .font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                if state.playbackURL != nil {
+                    if let r = zoomRange {
+                        Text(String(format: "表示範囲 %.2f – %.2f 秒", r.lowerBound, r.upperBound))
+                            .font(.callout).monospacedDigit()
+                        Button("全体") { zoomRange = nil }
+                    } else {
+                        Text("ピンチ / ホイールで横軸をズーム，横スクロールで移動")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -424,11 +520,18 @@ struct ContentView: View {
                 .frame(width: checkboxColumnWidth)
                 columnResizeHandle
                 ScrollView {
-                    // 再生中は録画全体を横軸に出し，赤い線がシークバーと同じ位置を動く。それ以外はライブの波形
+                    // 再生中は録画全体（ズーム中はその範囲）を横軸に出し，赤い線がシークバーと同じ位置を動く。
+                    // それ以外はライブの波形
                     let timeline = state.playbackURL != nil ? state.playbackTimeline : nil
-                    let times = timeline != nil ? state.playbackAllTimes : state.history.times
+                    let zoomed = (timeline != nil && zoomRange != nil)
+                        ? timeline!.range(fromSeconds: visibleRange.lowerBound, toSeconds: visibleRange.upperBound) : nil
+                    let times = zoomed?.times ?? (timeline != nil ? state.playbackAllTimes : state.history.times)
                     let endTime = timeline.map { $0.date(atVideoTime: state.playbackSeconds) }
-                    let fullDomain = timeline.map { $0.fullDomain(durationSeconds: state.playbackDuration) }
+                    let fullDomain: ClosedRange<Date>? = timeline.map { t in
+                        zoomRange != nil
+                            ? t.date(atVideoTime: visibleRange.lowerBound)...t.date(atVideoTime: visibleRange.upperBound)
+                            : t.fullDomain(durationSeconds: state.playbackDuration)
+                    }
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(state.metricMode.charts) { chart in
                             let kinds = chart.kinds.filter { isVisible($0, in: chart) }
@@ -438,7 +541,8 @@ struct ContentView: View {
                                     series: kinds.map { k in
                                         MultiSeriesGraphView.Series(
                                             id: k.rawValue, label: k.label,
-                                            data: timeline.map { $0.values[k] ?? [] } ?? state.history[k],
+                                            data: zoomed.map { $0.series[k] ?? [] }
+                                                ?? timeline.map { $0.values[k] ?? [] } ?? state.history[k],
                                             color: color(for: k))
                                     },
                                     unit: chart.unit, range: chart.yRange, times: times,
@@ -450,6 +554,28 @@ struct ContentView: View {
                     }
                     .padding(.vertical, 12)
                 }
+                .background(GeometryReader { geo in
+                    Color.clear
+                        .onAppear { graphsFrame = geo.frame(in: .global) }
+                        .onChange(of: geo.frame(in: .global)) { _, f in graphsFrame = f }
+                })
+                // トラックパッドのピンチでズーム（開始位置を中心に）
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { g in
+                            guard state.playbackURL != nil else { return }
+                            if magnifyStartRange == nil { magnifyStartRange = visibleRange }
+                            let start = magnifyStartRange ?? visibleRange
+                            let anchor = seconds(atX: g.startLocation.x)
+                            zoomRange = start
+                            zoom(by: Double(g.magnification), anchor: anchor)
+                        }
+                        .onEnded { _ in magnifyStartRange = nil }
+                )
+                .onAppear { installScrollMonitor() }
+                .onDisappear { removeScrollMonitor() }
+                .onChange(of: state.playbackURL) { _, _ in zoomRange = nil }
+                .onChange(of: state.playbackSeconds) { _, _ in followPlayback() }
             }
         }
     }
