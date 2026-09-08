@@ -32,8 +32,45 @@ struct ContentView: View {
     }
 
     /// 再生バー：再生 / 一時停止，コマ送り，シークバー，時刻。映像を非表示にしていても操作できる
-    /// チェックボックス列の幅（グラフ表示部分と再生バーの左端を揃えるため）
-    private let checkboxColumnWidth: CGFloat = 270
+    /// チェックボックス列の幅（グラフ表示部分と再生バーの左端を揃えるため）。
+    /// 列とグラフの境目を左右にドラッグして変え，次回起動時も保持する
+    @AppStorage("checkboxColumnWidth") private var savedColumnWidth: Double = 270
+    @State private var draggingColumnWidth: Double?
+    @State private var columnDragStart: Double?
+    private let columnWidthRange: ClosedRange<Double> = 160...600
+    private var checkboxColumnWidth: CGFloat { CGFloat(draggingColumnWidth ?? savedColumnWidth) }
+
+    /// チェックボックス列とグラフの境目。左右にドラッグするとグラフの横幅が変わる
+    private var columnResizeHandle: some View {
+        ZStack {
+            Rectangle().fill(Color(NSColor.separatorColor)).frame(width: 1)
+            Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 5, height: 48)
+        }
+        .frame(width: 12)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { g in
+                    if columnDragStart == nil { columnDragStart = savedColumnWidth }
+                    let w = (columnDragStart ?? savedColumnWidth) + g.translation.width
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) {
+                        draggingColumnWidth = min(max(w, columnWidthRange.lowerBound), columnWidthRange.upperBound)
+                    }
+                }
+                .onEnded { _ in
+                    if let w = draggingColumnWidth { savedColumnWidth = w }
+                    draggingColumnWidth = nil
+                    columnDragStart = nil
+                }
+        )
+        .help("ドラッグしてグラフの横幅を調整")
+    }
 
     private var transportBar: some View {
         HStack(spacing: 0) {
@@ -58,7 +95,7 @@ struct ContentView: View {
             .font(.system(size: 32))
             .buttonStyle(.borderless)
             .padding(.horizontal, 12)
-            .frame(width: checkboxColumnWidth + 1, alignment: .leading)
+            .frame(width: checkboxColumnWidth + 12, alignment: .leading)
             // 右：シークバーをグラフ表示部分と同じ横幅（グラフの枠と同じ余白）にする
             Slider(value: Binding(get: { state.playbackSeconds },
                                   set: { state.seek(to: $0) }),
@@ -385,7 +422,7 @@ struct ContentView: View {
                     .padding(12)
                 }
                 .frame(width: checkboxColumnWidth)
-                Divider()
+                columnResizeHandle
                 ScrollView {
                     // 再生中は録画全体を横軸に出し，赤い線がシークバーと同じ位置を動く。それ以外はライブの波形
                     let timeline = state.playbackURL != nil ? state.playbackTimeline : nil
