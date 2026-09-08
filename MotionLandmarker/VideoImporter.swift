@@ -31,6 +31,7 @@ nonisolated enum VideoImporter {
 
     /// バックグラウンドスレッドで呼ぶこと。`progress` は (処理済み, 総フレーム数の見込み)。
     static func run(videoURL: URL, outputRoot: URL, pipeline: LandmarkPipeline,
+                    multiPerson: Bool = false,
                     progress: @escaping @Sendable (Int, Int) -> Void,
                     isCancelled: @escaping @Sendable () -> Bool) throws -> Result {
         let asset = AVURLAsset(url: videoURL)
@@ -60,7 +61,7 @@ nonisolated enum VideoImporter {
             guard done.wait(timeout: .now() + 30) == .success else { throw ImportError.timeout(sent) }
             if !recorderStarted {
                 // 録画サイズは最初のフレームから決まる（カメラと同じ流れ）。先頭フレームは記録に含めない
-                do { try pipeline.startRecording(outputRoot: outputRoot, stem: stem) } catch {
+                do { try pipeline.startRecording(outputRoot: outputRoot, stem: stem, multiPerson: multiPerson) } catch {
                     throw ImportError.recorder(error)
                 }
                 recorderStarted = true

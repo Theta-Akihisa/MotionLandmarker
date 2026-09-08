@@ -123,6 +123,13 @@ nonisolated enum SkeletonRenderer {
         ctx.saveGState()
         ctx.translateBy(x: 0, y: size.height)
         ctx.scaleBy(x: 1, y: -1)
+        // 複数人モード：中央の人物以外は半透明で描く
+        if let frame, !frame.others.isEmpty {
+            ctx.saveGState()
+            ctx.setAlpha(0.55)
+            for other in frame.others { draw(other, in: ctx, size: size, options: options) }
+            ctx.restoreGState()
+        }
         draw(frame, in: ctx, size: size, options: options)
         ctx.restoreGState()
     }

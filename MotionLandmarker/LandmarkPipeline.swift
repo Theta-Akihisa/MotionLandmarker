@@ -119,9 +119,9 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
         }
     }
 
-    func startRecording(outputRoot: URL, stem: String) throws {
+    func startRecording(outputRoot: URL, stem: String, multiPerson: Bool = false) throws {
         try queue.sync {
-            recorder = try LandmarkRecorder(outputRoot: outputRoot, stem: stem, size: frameSize)
+            recorder = try LandmarkRecorder(outputRoot: outputRoot, stem: stem, size: frameSize, multiPerson: multiPerson)
         }
     }
 
@@ -131,6 +131,17 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
             guard let r = recorder else { completion(nil, nil); return }
             recorder = nil
             r.finish { error in completion(r, error) }
+        }
+    }
+
+    /// 人数モードを切り替える（1: 1 人，2: 複数人）。推論が空くのを待ってから送る。
+    /// 完了は client.onMode で通知される
+    func setPersonMode(_ mode: Int) {
+        DispatchQueue.global().async { [self] in
+            waitUntilIdle()
+            var tries = 0
+            while !client.sendControl(mode: mode), tries < 200 { usleep(5000); tries += 1 }
+            queue.async { self.previousFrame = nil }
         }
     }
 

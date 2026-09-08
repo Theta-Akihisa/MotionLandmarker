@@ -49,8 +49,17 @@ nonisolated enum SelfCheck {
         }
         pipeline.setCameraPaused(true)
         defer { fakeCameraRunning = false }
+        // 環境変数 ML_PERSON_MODE=2 で複数人モードを検証する
+        let multi = ProcessInfo.processInfo.environment["ML_PERSON_MODE"] == "2"
+        if multi {
+            let switched = DispatchSemaphore(value: 0)
+            client.onMode = { m in print("mode -> \(m)"); switched.signal() }
+            pipeline.setPersonMode(2)
+            guard switched.wait(timeout: .now() + 300) == .success else { print("mode switch timed out"); return 1 }
+        }
         do {
             let r = try VideoImporter.run(videoURL: videoURL, outputRoot: outputRoot, pipeline: pipeline,
+                                          multiPerson: multi,
                                           progress: { done, total in if done % 50 == 0 { print("\(done)/\(total)") } },
                                           isCancelled: { false })
             print("imported stem=\(r.stem) frames=\(r.frames) skipped=\(r.skippedVideoFrames) overlay=\(r.overlayURL.path)")

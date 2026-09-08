@@ -112,6 +112,8 @@ nonisolated enum SidecarBootstrap {
 nonisolated final class LandmarkerClient: @unchecked Sendable {
     var onResult: (@Sendable (LandmarkFrame) -> Void)?
     var onReady: (@Sendable () -> Void)?
+    /// モード切り替えの完了（サイドカーが返したモード番号）
+    var onMode: (@Sendable (Int) -> Void)?
     var onExit: (@Sendable (Int32, String) -> Void)?
 
     private let process = Process()
@@ -189,6 +191,28 @@ nonisolated final class LandmarkerClient: @unchecked Sendable {
         return true
     }
 
+    /// 制御メッセージ（payload_len = 0，timestamp = モード番号）を送る。推論中は送れない（false）。
+    /// 応答（{"mode": n}）が来るまで busy にして，フレームの送信を止める。
+    @discardableResult
+    func sendControl(mode: Int) -> Bool {
+        lock.lock()
+        guard running, isReady, !busy else { lock.unlock(); return false }
+        busy = true
+        lock.unlock()
+        var header = Data(capacity: 12)
+        var len = UInt32(0).bigEndian
+        var m = UInt64(mode).bigEndian
+        header.append(Data(bytes: &len, count: 4))
+        header.append(Data(bytes: &m, count: 8))
+        do {
+            try stdinPipe.fileHandleForWriting.write(contentsOf: header)
+        } catch {
+            lock.lock(); busy = false; lock.unlock()
+            return false
+        }
+        return true
+    }
+
     private func consume(_ data: Data) {
         guard !data.isEmpty else { return }
         lineBuffer.append(data)
@@ -203,9 +227,14 @@ nonisolated final class LandmarkerClient: @unchecked Sendable {
         if let frame = LandmarkFrame(jsonLine: line) {
             lock.lock(); busy = false; lock.unlock()
             onResult?(frame)
-        } else if let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any], obj["ready"] as? Bool == true {
-            lock.lock(); isReady = true; busy = false; lock.unlock()
-            onReady?()
+        } else if let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+            if obj["ready"] as? Bool == true {
+                lock.lock(); isReady = true; busy = false; lock.unlock()
+                onReady?()
+            } else if let m = obj["mode"] as? Int {
+                lock.lock(); busy = false; lock.unlock()
+                onMode?(m)
+            }
         }
     }
 }

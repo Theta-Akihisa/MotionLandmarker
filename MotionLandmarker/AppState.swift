@@ -21,6 +21,23 @@ final class AppState {
     var drawOptions = DrawOptions() {
         didSet { pipeline?.setDrawOptions(drawOptions) }
     }
+    /// 人数モード（1 人 / 複数人）。次回起動時も保持する
+    enum PersonMode: Int, CaseIterable, Identifiable {
+        case single = 1, multi = 2
+        var id: Int { rawValue }
+        var label: String { self == .single ? "1人" : "複数人" }
+    }
+    var personMode: PersonMode = PersonMode(rawValue: UserDefaults.standard.integer(forKey: "personMode")) ?? .single {
+        didSet {
+            UserDefaults.standard.set(personMode.rawValue, forKey: "personMode")
+            guard oldValue != personMode, let pipeline else { return }
+            isSwitchingPersonMode = true
+            pipeline.setPersonMode(personMode.rawValue)
+        }
+    }
+    /// モード切り替え中（モデルの読み込み中）
+    var isSwitchingPersonMode = false
+
     /// ライブ表示の見せ方（生映像 / skeleton / overlay / 非表示）。次回起動時も保持する
     var liveStyle: LiveStyle = LiveStyle(rawValue: UserDefaults.standard.string(forKey: "liveStyle") ?? "") ?? .overlay {
         didSet {
@@ -236,7 +253,7 @@ final class AppState {
     @ObservationIgnored private var pipeline: LandmarkPipeline?
     @ObservationIgnored private var fpsWindow: [TimeInterval] = []
 
-    var isReady: Bool { sidecarState == .ready && camera.isCameraAvailable }
+    var isReady: Bool { sidecarState == .ready && camera.isCameraAvailable && !isSwitchingPersonMode }
 
     func start() {
         guard client == nil else { return }
@@ -284,7 +301,22 @@ final class AppState {
         let pipeline = LandmarkPipeline(client: client)
         pipeline.setDrawOptions(drawOptions)
         pipeline.setLiveStyle(liveStyle)
-        client.onReady = { Task { @MainActor in self.sidecarState = .ready } }
+        client.onReady = {
+            Task { @MainActor in
+                self.sidecarState = .ready
+                // 前回のモードが複数人なら起動後に切り替える（サイドカーは 1 人モードで起動する）
+                if self.personMode == .multi {
+                    self.isSwitchingPersonMode = true
+                    pipeline.setPersonMode(self.personMode.rawValue)
+                }
+            }
+        }
+        client.onMode = { m in
+            Task { @MainActor in
+                self.isSwitchingPersonMode = false
+                if let mode = PersonMode(rawValue: m), mode != self.personMode { self.personMode = mode }
+            }
+        }
         client.onExit = { code, log in
             Task { @MainActor in
                 self.sidecarExitLog = log
@@ -340,7 +372,7 @@ final class AppState {
         let stem = "live_" + f.string(from: Date())
         playbackURL = nil
         do {
-            try pipeline.startRecording(outputRoot: outputRoot, stem: stem)
+            try pipeline.startRecording(outputRoot: outputRoot, stem: stem, multiPerson: personMode == .multi)
             isRecording = true
             recordedFrames = 0
             statusMessage = nil
@@ -402,9 +434,11 @@ final class AppState {
         statusMessage = nil
         pipeline.setCameraPaused(true)
         let outputRoot = self.outputRoot
+        let multi = personMode == .multi
         Task.detached { [self] in
             let result = Result {
                 try VideoImporter.run(videoURL: url, outputRoot: outputRoot, pipeline: pipeline,
+                                      multiPerson: multi,
                                       progress: { done, total in
                                           Task { @MainActor in self.importProgress = (done, total) }
                                       },

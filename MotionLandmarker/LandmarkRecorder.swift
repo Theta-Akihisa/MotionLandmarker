@@ -5,6 +5,8 @@
 //  録画 1 回分の出力。video2landmark（run.py）と同じ配置・同じ列構成で書く：
 //    results_data/csv/{stem}/{stem}_{face,hand,pose}.csv
 //    results_data/csv/{stem}/{stem}_metrics.csv   （グラフ用の指標．再生時に波形を出すために使う）
+//    results_data/json/{stem}/{stem}_people.json  （複数人モードのみ．全員分のランドマーク．先頭が中央の人物）
+//  複数人モードでも face / hand / pose の CSV / JSON は中央の人物だけ（1 人モードと同じ形式）．
 //    results_data/json/{stem}/{stem}_{face,hand,pose}.json
 //    results_data/video_raw/{stem}_raw.mp4          （生映像）
 //    results_data/video_overlay/{stem}_overlay.mp4  （映像＋ランドマーク）
@@ -33,14 +35,18 @@ nonisolated final class LandmarkRecorder {
     private var jsonFace: [[String: Any]] = []
     private var jsonHand: [[String: Any]] = []
     private var jsonPose: [[String: Any]] = []
+    private var jsonPeople: [[String: Any]] = []
+    /// 複数人モードで録画しているか（people.json を書く）
+    let multiPerson: Bool
     private(set) var frameCount = 0
 
     /// エンコーダが受け付けず動画に書けなかったフレーム数（CSV / JSON には残る）
     var skippedVideoFrames: Int { raw.skipped + overlay.skipped + skeleton.skipped }
 
-    init(outputRoot: URL, stem: String, size: CGSize) throws {
+    init(outputRoot: URL, stem: String, size: CGSize, multiPerson: Bool = false) throws {
         self.stem = stem
         self.size = size
+        self.multiPerson = multiPerson
         let fm = FileManager.default
         csvDirectory = outputRoot.appendingPathComponent("csv").appendingPathComponent(stem)
         jsonDirectory = outputRoot.appendingPathComponent("json").appendingPathComponent(stem)
@@ -74,6 +80,9 @@ nonisolated final class LandmarkRecorder {
         metricsCSV.append(frameIndex: frameCount, timestampMs: frame.timestampMs, metrics: metrics)
         LandmarkJSON.append(frameIndex: frameCount, frame: frame,
                             face: &jsonFace, hand: &jsonHand, pose: &jsonPose)
+        if multiPerson {
+            LandmarkJSON.appendPeople(frameIndex: frameCount, frame: frame, into: &jsonPeople)
+        }
         frameCount += 1
     }
 
@@ -84,6 +93,9 @@ nonisolated final class LandmarkRecorder {
             try LandmarkJSON.write(jsonFace, to: jsonDirectory.appendingPathComponent("\(stem)_face.json"))
             try LandmarkJSON.write(jsonHand, to: jsonDirectory.appendingPathComponent("\(stem)_hand.json"))
             try LandmarkJSON.write(jsonPose, to: jsonDirectory.appendingPathComponent("\(stem)_pose.json"))
+            if multiPerson {
+                try LandmarkJSON.write(jsonPeople, to: jsonDirectory.appendingPathComponent("\(stem)_people.json"))
+            }
         } catch {
             completion(error); return
         }
@@ -267,6 +279,25 @@ nonisolated enum LandmarkJSON {
             ? frame.pose.map { ["x": $0.x, "y": $0.y, "z": $0.z, "visibility": $0.visibility] }
             : NSNull()
         pose.append(["frame": frameIndex, "timestamp_ms": frame.timestampMs, "landmarks": p])
+    }
+
+    /// 複数人モード：全員分（先頭が中央の人物）を 1 行にまとめる
+    static func appendPeople(frameIndex: Int, frame: LandmarkFrame, into rows: inout [[String: Any]]) {
+        func person(_ f: LandmarkFrame) -> [String: Any] {
+            func xyz(_ lms: [Landmark], count: Int) -> Any {
+                guard lms.count == count else { return NSNull() }
+                return lms.map { ["x": $0.x, "y": $0.y, "z": $0.z] }
+            }
+            let pose: Any = f.pose.count == LandmarkFrame.poseCount
+                ? f.pose.map { ["x": $0.x, "y": $0.y, "z": $0.z, "visibility": $0.visibility] } : NSNull()
+            return ["pose": pose,
+                    "face": xyz(f.face, count: LandmarkFrame.faceCount),
+                    "left": xyz(f.leftHand, count: LandmarkFrame.handCount),
+                    "right": xyz(f.rightHand, count: LandmarkFrame.handCount)]
+        }
+        let detected = frame.pose.count == LandmarkFrame.poseCount
+        let people = (detected ? [frame] : []) + frame.others
+        rows.append(["frame": frameIndex, "timestamp_ms": frame.timestampMs, "people": people.map(person)])
     }
 
     static func write(_ rows: [[String: Any]], to url: URL) throws {

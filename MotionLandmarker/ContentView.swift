@@ -142,6 +142,17 @@ struct ContentView: View {
                 Spacer()
                 sidecarStatus
                 Spacer()
+                Picker("人数", selection: $state.personMode) {
+                    ForEach(AppState.PersonMode.allCases) { m in Text(m.label).tag(m) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 150)
+                .disabled(state.isRecording || state.isImporting || state.isSwitchingPersonMode)
+                .help("1人: Holistic（1人専用）/ 複数人: Pose・Hand・Face を組み合わせて最大4人．グラフと CSV は画面中央の人")
+                if state.isSwitchingPersonMode {
+                    ProgressView().controlSize(.small)
+                }
                 @Bindable var camera = state.camera
                 Picker("カメラ", selection: $camera.selectedDeviceID) {
                     ForEach(state.camera.devices, id: \.id) { d in

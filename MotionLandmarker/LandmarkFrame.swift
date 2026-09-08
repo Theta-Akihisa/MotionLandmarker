@@ -26,6 +26,8 @@ nonisolated struct LandmarkFrame: Sendable {
     var face: [Landmark]        // 478 点 or 空
     var leftHand: [Landmark]    // 21 点 or 空（本人の左手）
     var rightHand: [Landmark]   // 21 点 or 空（本人の右手）
+    /// 複数人モードで検出した，中央の人物以外の人物（1 人モードでは空）
+    var others: [LandmarkFrame] = []
 
     static let poseCount = 33
     static let faceCount = 478
@@ -47,6 +49,18 @@ nonisolated struct LandmarkFrame: Sendable {
         guard let obj = try? JSONSerialization.jsonObject(with: jsonLine) as? [String: Any],
               let t = obj["t"] as? Int else { return nil }
         timestampMs = t
+        pose = Self.parse(obj["pose"])
+        poseWorld = Self.parse(obj["pose_world"])
+        face = Self.parse(obj["face"])
+        leftHand = Self.parse(obj["lh"])
+        rightHand = Self.parse(obj["rh"])
+        if let people = obj["people"] as? [[String: Any]] {
+            others = people.map { LandmarkFrame(timestampMs: t, dict: $0) }
+        }
+    }
+
+    private init(timestampMs: Int, dict obj: [String: Any]) {
+        self.timestampMs = timestampMs
         pose = Self.parse(obj["pose"])
         poseWorld = Self.parse(obj["pose_world"])
         face = Self.parse(obj["face"])
