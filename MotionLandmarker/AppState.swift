@@ -57,7 +57,11 @@ final class AppState {
     @ObservationIgnored private(set) var player: AVPlayer?
     @ObservationIgnored private var timeObserver: Any?
     /// 再生中の録画の指標時系列（同じ録画の CSV から読む）。無ければ nil
-    var playbackTimeline: PlaybackTimeline?
+    var playbackTimeline: PlaybackTimeline? {
+        didSet { playbackAllTimes = playbackTimeline?.allTimes ?? [] }
+    }
+    /// playbackTimeline の全フレームの時刻（毎フレーム計算しないようキャッシュ）
+    private(set) var playbackAllTimes: [Date] = []
     /// 動画の再生位置（秒）
     var playbackSeconds: Double = 0
     /// 動画の長さ（秒）

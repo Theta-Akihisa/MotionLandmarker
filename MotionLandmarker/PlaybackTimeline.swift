@@ -119,8 +119,19 @@ nonisolated struct PlaybackTimeline: Sendable {
         return (times, series)
     }
 
-    /// 再生位置に対応する Date（slice の times と同じ基準）
+    /// 再生位置に対応する Date（slice / allTimes と同じ基準）
     func date(atVideoTime seconds: Double) -> Date {
         Date(timeIntervalSince1970: Double(firstTimestamp) / 1000 + seconds)
+    }
+
+    /// 全フレームの時刻（録画全体を横軸に出すとき用）
+    var allTimes: [Date] { timestamps.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+
+    /// 録画全体の横軸範囲。動画の長さ（秒）を渡すと末尾をそれに合わせる
+    func fullDomain(durationSeconds: Double) -> ClosedRange<Date> {
+        let start = date(atVideoTime: 0)
+        let lastSample = Date(timeIntervalSince1970: Double(timestamps.last ?? firstTimestamp) / 1000)
+        let end = max(date(atVideoTime: durationSeconds), lastSample)
+        return start < end ? start...end : start...start.addingTimeInterval(1)
     }
 }

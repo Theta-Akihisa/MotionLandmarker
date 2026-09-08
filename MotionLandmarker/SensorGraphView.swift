@@ -130,13 +130,15 @@ struct MultiSeriesGraphView: View {
     var maxPoints = 240
     /// 横軸の右端（現時点）。nil なら最新サンプルの時刻。再生時は動画の再生位置を渡す
     var endTime: Date? = nil
+    /// 横軸を固定する範囲（録画の再生で全体を出すとき）。指定時は endTime は現在位置の線にだけ使う
+    var fixedDomain: ClosedRange<Date>? = nil
 
     private var count: Int { series.map(\.data.count).max() ?? 0 }
     private var stride: Int { max(1, count / maxPoints) }
     private var useTimeAxis: Bool { endTime != nil || (times.map { $0.count == count && !$0.isEmpty } ?? false) }
     private var lastTime: Date { endTime ?? times?.last ?? Date() }
     private var timeDomain: ClosedRange<Date> {
-        lastTime.addingTimeInterval(-windowSeconds)...lastTime
+        fixedDomain ?? lastTime.addingTimeInterval(-windowSeconds)...lastTime
     }
 
     private func clamp(_ v: Float) -> Float { min(max(v, range.lowerBound), range.upperBound) }

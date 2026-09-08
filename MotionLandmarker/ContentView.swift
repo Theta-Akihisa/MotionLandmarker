@@ -376,11 +376,11 @@ struct ContentView: View {
                 .frame(width: checkboxColumnWidth)
                 Divider()
                 ScrollView {
-                    // 再生中は動画の再生位置に合わせて録画の波形を出す。それ以外はライブの波形
-                    let playback = state.playbackURL != nil
-                        ? state.playbackTimeline?.slice(atVideoTime: state.playbackSeconds, window: 10) : nil
-                    let times = playback?.times ?? state.history.times
-                    let endTime = state.playbackTimeline.map { $0.date(atVideoTime: state.playbackSeconds) }
+                    // 再生中は録画全体を横軸に出し，赤い線がシークバーと同じ位置を動く。それ以外はライブの波形
+                    let timeline = state.playbackURL != nil ? state.playbackTimeline : nil
+                    let times = timeline != nil ? state.playbackAllTimes : state.history.times
+                    let endTime = timeline.map { $0.date(atVideoTime: state.playbackSeconds) }
+                    let fullDomain = timeline.map { $0.fullDomain(durationSeconds: state.playbackDuration) }
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(state.metricMode.charts) { chart in
                             let kinds = chart.kinds.filter { isVisible($0, in: chart) }
@@ -390,11 +390,12 @@ struct ContentView: View {
                                     series: kinds.map { k in
                                         MultiSeriesGraphView.Series(
                                             id: k.rawValue, label: k.label,
-                                            data: playback.map { $0.series[k] ?? [] } ?? state.history[k],
+                                            data: timeline.map { $0.values[k] ?? [] } ?? state.history[k],
                                             color: color(for: k))
                                     },
                                     unit: chart.unit, range: chart.yRange, times: times,
-                                    endTime: state.playbackURL != nil ? endTime : nil)
+                                    endTime: state.playbackURL != nil ? endTime : nil,
+                                    fixedDomain: fullDomain)
                                 .padding(.horizontal)
                             }
                         }
