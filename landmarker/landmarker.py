@@ -30,7 +30,7 @@ from mediapipe.tasks.python import BaseOptions, vision
 MODEL_BASE = "https://storage.googleapis.com/mediapipe-models/"
 MODELS = {
     "holistic_landmarker.task": MODEL_BASE + "holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
-    "pose_landmarker_full.task": MODEL_BASE + "pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
+    "pose_landmarker_heavy.task": MODEL_BASE + "pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
     "hand_landmarker.task": MODEL_BASE + "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task",
     "face_landmarker.task": MODEL_BASE + "face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
 }
@@ -91,7 +91,7 @@ class MultiDetector:
 
     def __init__(self):
         self.pose = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=model_path("pose_landmarker_full.task")),
+            base_options=BaseOptions(model_asset_path=model_path("pose_landmarker_heavy.task")),
             running_mode=vision.RunningMode.VIDEO, num_poses=MAX_PEOPLE,
         ))
         self.hand = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
