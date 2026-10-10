@@ -10,6 +10,8 @@ import AVKit
 struct MotionLandmarkerApp: App {
     @State private var state = AppState()
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
+    /// 画面の拡大段階（⌘+ / ⌘- / ⌘0）。次回起動時も保持する
+    @AppStorage(UIScale.key) private var uiScaleStep: Int = 0
 
     init() {
         // `--check <動画>` は GUI を起動せずにパイプラインを検証して終了する
@@ -24,12 +26,26 @@ struct MotionLandmarkerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(state: state)
+                .environment(\.dynamicTypeSize, UIScale.typeSize(for: uiScaleStep))
+                .environment(\.uiScale, UIScale.factor(for: uiScaleStep))
                 .onAppear {
                     delegate.state = state
                     state.start()
                 }
         }
         .defaultSize(width: 1280, height: 1000)
+        .commands {
+            CommandGroup(after: .toolbar) {
+                Button("拡大") { uiScaleStep = UIScale.clamp(uiScaleStep + 1) }
+                    .keyboardShortcut("=", modifiers: .command)       // ⌘+（Shift なし）
+                Button("拡大 ") { uiScaleStep = UIScale.clamp(uiScaleStep + 1) }
+                    .keyboardShortcut("+", modifiers: [.command, .shift])
+                Button("縮小") { uiScaleStep = UIScale.clamp(uiScaleStep - 1) }
+                    .keyboardShortcut("-", modifiers: .command)
+                Button("実際のサイズ") { uiScaleStep = 0 }
+                    .keyboardShortcut("0", modifiers: .command)
+            }
+        }
     }
 }
 

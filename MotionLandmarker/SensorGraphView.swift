@@ -132,6 +132,7 @@ struct MultiSeriesGraphView: View {
     var endTime: Date? = nil
     /// 横軸を固定する範囲（録画の再生で全体を出すとき）。指定時は endTime は現在位置の線にだけ使う
     var fixedDomain: ClosedRange<Date>? = nil
+    @Environment(\.uiScale) private var uiScale
 
     private var count: Int { series.map(\.data.count).max() ?? 0 }
     private var stride: Int { max(1, count / maxPoints) }
@@ -152,13 +153,13 @@ struct MultiSeriesGraphView: View {
                 // グラフ間で同じ列に揃う（3 系列のグラフは左へ 1 列分伸びるだけ）
                 ForEach(series) { s in
                     HStack(spacing: 2) {
-                        Circle().fill(s.color).frame(width: 11, height: 11).padding(.trailing, 3)
+                        Circle().fill(s.color).frame(width: 11 * uiScale, height: 11 * uiScale).padding(.trailing, 3)
                         Text(s.label).font(.title3).lineLimit(1)
-                            .frame(width: 96, alignment: .leading)
+                            .frame(width: 96 * uiScale, alignment: .leading)
                         // 値の有無や桁数で幅が変わらないよう固定幅にする（"-180.00" が収まる幅）
                         Text((s.data.last ?? nil).map { String(format: "%.2f", $0) } ?? "--")
                             .font(.title3).foregroundStyle(.secondary).monospacedDigit()
-                            .frame(width: 68, alignment: .trailing)
+                            .frame(width: 68 * uiScale, alignment: .trailing)
                     }
                 }
             }
@@ -200,7 +201,7 @@ struct MultiSeriesGraphView: View {
             .chartXScale(domain: useTimeAxis ? timeDomain : Date()...Date())
             .chartXAxis(.hidden)
             .chartLegend(.hidden)
-            .frame(height: 120)
+            .frame(height: 120 * uiScale)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

@@ -7,6 +7,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var state: AppState
+    @Environment(\.uiScale) private var uiScale
 
     /// 映像部分の高さ。仕切りをドラッグして変え，次回起動時も保持する。
     /// ドラッグ中は `draggingHeight` だけを動かし（UserDefaults への書き込みを避ける），終了時に保存する。
@@ -38,7 +39,7 @@ struct ContentView: View {
     @State private var draggingColumnWidth: Double?
     @State private var columnDragStart: Double?
     private let columnWidthRange: ClosedRange<Double> = 160...600
-    private var checkboxColumnWidth: CGFloat { CGFloat(draggingColumnWidth ?? savedColumnWidth) }
+    private var checkboxColumnWidth: CGFloat { CGFloat(draggingColumnWidth ?? savedColumnWidth) * uiScale }
 
     /// 再生時のグラフの横軸の表示範囲（動画の秒）。nil なら全体
     @State private var zoomRange: ClosedRange<Double>?
@@ -178,7 +179,7 @@ struct ContentView: View {
                 }
                 .font(.title2).monospacedDigit()
             }
-            .font(.system(size: 32))
+            .font(.system(size: 32 * uiScale))
             .buttonStyle(.borderless)
             .padding(.horizontal, 12)
             .frame(width: checkboxColumnWidth + 12, alignment: .leading)
@@ -625,11 +626,12 @@ private struct CameraControlButton: View {
     let label: String
     let tint: Color
     let action: () -> Void
+    @Environment(\.uiScale) private var uiScale
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 27)).foregroundStyle(tint)
+                Image(systemName: icon).font(.system(size: 27 * uiScale)).foregroundStyle(tint)
                 Text(label).font(.title3).foregroundStyle(tint)
             }
             .frame(maxWidth: .infinity)
