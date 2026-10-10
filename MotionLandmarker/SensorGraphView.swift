@@ -133,6 +133,10 @@ struct MultiSeriesGraphView: View {
     /// 横軸を固定する範囲（録画の再生で全体を出すとき）。指定時は endTime は現在位置の線にだけ使う
     var fixedDomain: ClosedRange<Date>? = nil
     @Environment(\.uiScale) private var uiScale
+    // 凡例の幅は文字サイズ段階（title3）と同じ比率で拡大する（倍率で掛けると文字の拡大率と合わず欠ける）
+    @ScaledMetric(relativeTo: .title3) private var labelWidth: CGFloat = 96
+    @ScaledMetric(relativeTo: .title3) private var valueWidth: CGFloat = 68
+    @ScaledMetric(relativeTo: .title3) private var markerSize: CGFloat = 11
 
     private var count: Int { series.map(\.data.count).max() ?? 0 }
     private var stride: Int { max(1, count / maxPoints) }
@@ -153,13 +157,13 @@ struct MultiSeriesGraphView: View {
                 // グラフ間で同じ列に揃う（3 系列のグラフは左へ 1 列分伸びるだけ）
                 ForEach(series) { s in
                     HStack(spacing: 2) {
-                        Circle().fill(s.color).frame(width: 11 * uiScale, height: 11 * uiScale).padding(.trailing, 3)
-                        Text(s.label).font(.title3).lineLimit(1)
-                            .frame(width: 96 * uiScale, alignment: .leading)
+                        Circle().fill(s.color).frame(width: markerSize, height: markerSize).padding(.trailing, 3)
+                        Text(s.label).font(.title3).lineLimit(1).fixedSize()
+                            .frame(width: labelWidth, alignment: .leading)
                         // 値の有無や桁数で幅が変わらないよう固定幅にする（"-180.00" が収まる幅）
                         Text((s.data.last ?? nil).map { String(format: "%.2f", $0) } ?? "--")
                             .font(.title3).foregroundStyle(.secondary).monospacedDigit()
-                            .frame(width: 68 * uiScale, alignment: .trailing)
+                            .frame(width: valueWidth, alignment: .trailing)
                     }
                 }
             }
