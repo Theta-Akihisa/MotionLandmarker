@@ -19,10 +19,12 @@ def qimage_to_bgr(img: QImage) -> np.ndarray | None:
             return None
         w, h, bpl = conv.width(), conv.height(), conv.bytesPerLine()
         buf = np.frombuffer(conv.constBits(), np.uint8, count=bpl * h).reshape(h, bpl)[:, : w * 4]
-        return np.ascontiguousarray(buf.reshape(h, w, 4)[:, :, :3])
+        # QImage のバッファは conv の寿命とともに解放されるため，必ずコピーして返す
+        # （ascontiguousarray は既に連続なら参照を返すので使わない）
+        return buf.reshape(h, w, 4)[:, :, :3].copy()
     w, h, bpl = conv.width(), conv.height(), conv.bytesPerLine()
     buf = np.frombuffer(conv.constBits(), np.uint8, count=bpl * h).reshape(h, bpl)[:, : w * 3]
-    return np.ascontiguousarray(buf.reshape(h, w, 3))
+    return buf.reshape(h, w, 3).copy()
 
 
 class Camera(QObject):
@@ -96,13 +98,13 @@ class Camera(QObject):
             r = vf.surfaceFormat().rotation()
         rot = int(getattr(r, "value", r))
         if rot == 90:
-            bgr = np.ascontiguousarray(np.rot90(bgr, -1))
+            bgr = np.rot90(bgr, -1).copy()
         elif rot == 180:
-            bgr = np.ascontiguousarray(np.rot90(bgr, 2))
+            bgr = np.rot90(bgr, 2).copy()
         elif rot == 270:
-            bgr = np.ascontiguousarray(np.rot90(bgr, 1))
+            bgr = np.rot90(bgr, 1).copy()
         if vf.mirrored() if hasattr(vf, "mirrored") else vf.surfaceFormat().isMirrored():
-            bgr = np.ascontiguousarray(bgr[:, ::-1])
+            bgr = bgr[:, ::-1].copy()
         now = time.monotonic()
         if self._start is None:
             self._start = now
