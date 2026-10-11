@@ -3,6 +3,11 @@
 Webカメラの映像から MediaPipe Holistic Landmarker で上半身のランドマークをリアルタイムに抽出し，
 映像への重ね描き・動作の波形グラフ表示・録画（CSV / JSON / 動画3種）を行う macOS アプリです．
 
+## Python 単体版（macOS / Windows）
+
+`python/` に，同じ機能を Python だけで実装した版があります（Windows でも動きます）．出力の形式は共通で，互いの録画を再生できます．
+セットアップと使い方は [python/README.md](python/README.md) を参照してください．
+
 ## 必要なもの
 
 - macOS 26 以降，Xcode 26 以降
