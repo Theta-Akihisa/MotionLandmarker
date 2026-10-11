@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
         self.camera = Camera(self)
         self.camera.frame.connect(self._on_camera_frame)
         self.camera.devices_changed.connect(self._refresh_cameras)
-        self.camera.error.connect(lambda s: self._status(f"カメラ: {s}"))
+        self.camera.error.connect(self._on_camera_error)
 
         self._build_ui()
         self._apply_scale(int(self.settings.value("uiScaleStep", 0)))
@@ -456,6 +456,12 @@ class MainWindow(QMainWindow):
         self.video.badge_bl = d.description()
         self.video.message = None
         self.video.update()
+
+    def _on_camera_error(self, msg: str):
+        self.video.message = f"カメラのエラー: {msg}\n別のカメラを選ぶか，Windows の設定 > プライバシーとセキュリティ > カメラ でデスクトップアプリの許可を確認してください"
+        self.video.update()
+        self.msg_label.setText(f"カメラ: {msg}")
+        print("camera error:", msg, file=sys.stderr, flush=True)
 
     def _on_camera_frame(self, bgr: np.ndarray, ms: int):
         if self.playback.url is not None or self.importing:

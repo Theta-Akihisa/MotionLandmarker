@@ -61,7 +61,9 @@ class Camera(QObject):
                 best = f
         if best is not None:
             self.camera.setCameraFormat(best)
-        self.camera.errorOccurred.connect(lambda e, s: self.error.emit(s))
+        self.camera.errorOccurred.connect(lambda e, s: self.error.emit(f"{s} ({e})"))
+        if self.camera.error() != QCamera.Error.NoError:
+            self.error.emit(self.camera.errorString())
         self.session.setCamera(self.camera)
         self.camera.start()
 
