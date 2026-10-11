@@ -8,6 +8,8 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var state: AppState
     @Environment(\.uiScale) private var uiScale
+    /// ライブ映像を左右反転して表示する（鏡のように見せる）。表示だけで，録画・CSV には影響しない
+    @AppStorage("mirrorLive") private var mirrorLive = false
 
     /// 映像部分の高さ。仕切りをドラッグして変え，次回起動時も保持する。
     /// ドラッグ中は `draggingHeight` だけを動かし（UserDefaults への書き込みを避ける），終了時に保存する。
@@ -262,6 +264,8 @@ struct ContentView: View {
                         Toggle("左手", isOn: $state.drawOptions.leftHand)
                         Toggle("右手", isOn: $state.drawOptions.rightHand)
                     }
+                    Toggle("ミラー", isOn: $mirrorLive)
+                        .help("表示を左右反転する（鏡のように見せる）．録画や CSV の座標は変わらない")
                 }
                 Spacer()
                 sidecarStatus
@@ -305,6 +309,7 @@ struct ContentView: View {
                     Image(decorative: img, scale: 1)
                         .resizable()
                         .aspectRatio(CGFloat(img.width) / CGFloat(img.height), contentMode: .fit)
+                        .scaleEffect(x: mirrorLive ? -1 : 1, y: 1)   // ミラー表示（表示だけ反転）
                         .background(Color(cgColor: SkeletonRenderer.sketchBackground))
                 } else if state.camera.permissionDenied {
                     VStack(spacing: 12) {
@@ -414,12 +419,6 @@ struct ContentView: View {
                 .disabled(!state.isReady || state.isImporting)
                 .help(state.playbackURL != nil ? "録画を始めると再生は止まります" : "")
                 .keyboardShortcut("r", modifiers: .command)
-
-                CameraControlButton(
-                    icon: "camera.rotate", label: "Switch",
-                    tint: state.camera.canSwitchCamera ? .primary : .secondary
-                ) { state.camera.switchCamera() }
-                .disabled(!state.camera.canSwitchCamera)
 
                 CameraControlButton(
                     icon: state.playbackURL != nil ? "video.circle" : "play.circle",
