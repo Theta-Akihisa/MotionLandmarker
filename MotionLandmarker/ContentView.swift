@@ -547,7 +547,8 @@ struct ContentView: View {
                                     },
                                     unit: chart.unit, range: chart.yRange, times: times,
                                     endTime: state.playbackURL != nil ? endTime : nil,
-                                    fixedDomain: fullDomain)
+                                    fixedDomain: fullDomain,
+                                    indexOffset: timeline != nil ? 0 : state.history.startIndex)
                                 .padding(.horizontal)
                             }
                         }

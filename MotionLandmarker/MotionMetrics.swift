@@ -199,6 +199,8 @@ nonisolated struct MetricHistory: Sendable {
     private(set) var series: [MetricKind: [Float?]] = [:]
     /// 各サンプルを受け取った時刻（series と同じ長さ）
     private(set) var times: [Date] = []
+    /// 先頭要素の通算サンプル番号。先頭が削られても描画の間引き位相が変わらないようにする
+    private(set) var startIndex = 0
 
     init(capacity: Int = 300) {
         self.capacity = capacity
@@ -207,7 +209,11 @@ nonisolated struct MetricHistory: Sendable {
 
     mutating func push(_ values: [MetricKind: Double], at time: Date = Date()) {
         times.append(time)
-        if times.count > capacity { times.removeFirst(times.count - capacity) }
+        if times.count > capacity {
+            let drop = times.count - capacity
+            times.removeFirst(drop)
+            startIndex += drop
+        }
         for k in MetricKind.allCases {
             var arr = series[k] ?? []
             arr.append(values[k].map(Float.init))

@@ -106,15 +106,19 @@ struct MultiSeriesGraphView: View {
 
         /// 連続して値がある区間ごとに分ける。区間ごとに別の系列として描くと線がつながらない。
         /// `stride` 個おきに間引く（欠損の境界は保つ）。
-        func segments(stride: Int) -> [(run: Int, points: [(index: Int, value: Float)])] {
+        /// 間引きの位相と区間の識別子は通算サンプル番号（index + offset）で決め，
+        /// 履歴の先頭が削られても描く点と識別子が変わらないようにする（チラつき防止）。
+        func segments(stride: Int, offset: Int) -> [(run: Int, points: [(index: Int, value: Float)])] {
             var out: [(Int, [(Int, Float)])] = []
             var current: [(Int, Float)] = []
+            var runStart = 0
             for (i, v) in data.enumerated() {
                 if let v {
-                    if i % stride == 0 || current.isEmpty { current.append((i, v)) }
-                } else if !current.isEmpty { out.append((out.count, current)); current = [] }
+                    if current.isEmpty { runStart = i + offset }
+                    if (i + offset) % stride == 0 || current.isEmpty { current.append((i, v)) }
+                } else if !current.isEmpty { out.append((runStart, current)); current = [] }
             }
-            if !current.isEmpty { out.append((out.count, current)) }
+            if !current.isEmpty { out.append((runStart, current)) }
             return out
         }
     }
@@ -132,6 +136,8 @@ struct MultiSeriesGraphView: View {
     var endTime: Date? = nil
     /// 横軸を固定する範囲（録画の再生で全体を出すとき）。指定時は endTime は現在位置の線にだけ使う
     var fixedDomain: ClosedRange<Date>? = nil
+    /// data[0] の通算サンプル番号（ライブの履歴は先頭が削られるため）
+    var indexOffset: Int = 0
     @Environment(\.uiScale) private var uiScale
     // 凡例の幅は文字サイズ段階（title3）と同じ比率で拡大する（倍率で掛けると文字の拡大率と合わず欠ける）
     @ScaledMetric(relativeTo: .title3) private var labelWidth: CGFloat = 96
@@ -176,7 +182,7 @@ struct MultiSeriesGraphView: View {
                     RuleMark(x: .value("Now", count - 1)).foregroundStyle(Color.red).lineStyle(StrokeStyle(lineWidth: 2.5))
                 }
                 ForEach(series) { s in
-                    ForEach(s.segments(stride: stride), id: \.run) { seg in
+                    ForEach(s.segments(stride: stride, offset: indexOffset), id: \.run) { seg in
                         ForEach(seg.points, id: \.index) { pt in
                             if useTimeAxis, let times, pt.index < times.count {
                                 LineMark(x: .value("Time", times[pt.index]), y: .value("Value", clamp(pt.value)),
@@ -195,6 +201,8 @@ struct MultiSeriesGraphView: View {
             }
             .chartYScale(domain: range)
             .chartPlotStyle { $0.clipped() }
+            // データの更新をアニメーションで補間しない（過去の点が動いて見えるのを防ぐ）
+            .transaction { $0.animation = nil }
             .chartYAxis {
                 AxisMarks(position: .leading,
                           values: [range.lowerBound, (range.lowerBound + range.upperBound) / 2, range.upperBound]) {
