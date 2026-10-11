@@ -43,7 +43,8 @@ class Worker(QObject):
         try:
             self.result.emit(*self.pipeline.process(bgr, ms))
         except Exception as e:
-            self.failed.emit(str(e))
+            # 1 フレームの失敗で止めない（次のフレームは処理する）．原因は画面に出す
+            self.failed.emit(f"{type(e).__name__}: {str(e).strip().splitlines()[-1] if str(e).strip() else ''}")
         finally:
             self.busy.clear()
 

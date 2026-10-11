@@ -474,8 +474,10 @@ class MainWindow(QMainWindow):
 
     def _on_worker_failed(self, msg: str):
         self.status_label.setText(f"推論エラー: {msg}")
+        self.status_label.setToolTip(msg)
         self.status_label.setStyleSheet("color: red")
         self.switching_mode = False
+        print("inference error:", msg, file=sys.stderr, flush=True)
 
     def _on_mode_changed(self, mode: int):
         self.switching_mode = False

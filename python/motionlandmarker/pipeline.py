@@ -41,6 +41,8 @@ class Pipeline:
 
     def process(self, bgr: np.ndarray, timestamp_ms: int):
         """フレーム（BGR）を処理し，(表示用 BGR | None, Frame, metrics, 録画フレーム数) を返す."""
+        if bgr is None or bgr.ndim != 3 or bgr.shape[0] < 2 or bgr.shape[1] < 2:
+            raise ValueError(f"invalid frame: {None if bgr is None else bgr.shape}")
         h, w = bgr.shape[:2]
         iw = INFERENCE_WIDTH
         ih = max(1, int(round(h * iw / w)))

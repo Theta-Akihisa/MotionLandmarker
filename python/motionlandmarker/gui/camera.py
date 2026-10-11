@@ -10,10 +10,18 @@ from PySide6.QtMultimedia import (QCamera, QCameraDevice, QMediaCaptureSession, 
                                   QVideoFrame, QVideoSink)
 
 
-def qimage_to_bgr(img: QImage) -> np.ndarray:
-    img = img.convertToFormat(QImage.Format.Format_BGR888)
-    w, h, bpl = img.width(), img.height(), img.bytesPerLine()
-    buf = np.frombuffer(img.constBits(), np.uint8, count=bpl * h).reshape(h, bpl)[:, : w * 3]
+def qimage_to_bgr(img: QImage) -> np.ndarray | None:
+    """QImage → BGR の numpy．変換できない形式（Windows の一部のカメラ）では RGB32 経由で変換する．失敗時は None."""
+    conv = img.convertToFormat(QImage.Format.Format_BGR888)
+    if conv.isNull() or conv.width() == 0 or conv.height() == 0:
+        conv = img.convertToFormat(QImage.Format.Format_RGB32)   # BGRA（リトルエンディアン）
+        if conv.isNull() or conv.width() == 0 or conv.height() == 0:
+            return None
+        w, h, bpl = conv.width(), conv.height(), conv.bytesPerLine()
+        buf = np.frombuffer(conv.constBits(), np.uint8, count=bpl * h).reshape(h, bpl)[:, : w * 4]
+        return np.ascontiguousarray(buf.reshape(h, w, 4)[:, :, :3])
+    w, h, bpl = conv.width(), conv.height(), conv.bytesPerLine()
+    buf = np.frombuffer(conv.constBits(), np.uint8, count=bpl * h).reshape(h, bpl)[:, : w * 3]
     return np.ascontiguousarray(buf.reshape(h, w, 3))
 
 
@@ -77,6 +85,8 @@ class Camera(QObject):
         if img.isNull():
             return
         bgr = qimage_to_bgr(img)
+        if bgr is None or bgr.size == 0:
+            return
         # フレームの回転・反転情報（toImage では適用されない）を反映する
         try:
             r = vf.rotation()                  # Qt 6.7+（QtVideo.Rotation）
