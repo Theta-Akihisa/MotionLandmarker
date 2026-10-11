@@ -546,7 +546,7 @@ struct ContentView: View {
                                             color: color(for: k))
                                     },
                                     unit: chart.unit, range: chart.yRange, times: times,
-                                    endTime: state.playbackURL != nil ? endTime : nil,
+                                    endTime: state.playbackURL != nil ? endTime : state.chartNow,
                                     fixedDomain: fullDomain,
                                     indexOffset: timeline != nil ? 0 : state.history.startIndex)
                                 .padding(.horizontal)

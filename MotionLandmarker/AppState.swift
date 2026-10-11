@@ -60,7 +60,10 @@ final class AppState {
     @ObservationIgnored private var liveHistory = MetricHistory(capacity: 600)
     @ObservationIgnored private var historyDirty = false
     @ObservationIgnored private var chartTimer: Timer?
-    static let chartRefreshInterval: TimeInterval = 1.0 / 20
+    /// グラフの更新周期（120 Hz）。横軸の右端を現在時刻にして，新しいデータが無くても波形を流す
+    static let chartRefreshInterval: TimeInterval = 1.0 / 120
+    /// ライブのグラフの横軸の右端（現在時刻）。更新周期ごとに進む
+    var chartNow = Date()
     var inferenceFPS: Double = 0
     var isRecording = false
     var recordedFrames = 0
@@ -345,9 +348,12 @@ final class AppState {
         liveHistory.push(metrics)
         historyDirty = true
         if chartTimer == nil {
-            chartTimer = Timer.scheduledTimer(withTimeInterval: Self.chartRefreshInterval, repeats: true) { _ in
+            let t = Timer(timeInterval: Self.chartRefreshInterval, repeats: true) { _ in
                 Task { @MainActor in self.flushHistory() }
             }
+            t.tolerance = 0
+            RunLoop.main.add(t, forMode: .common)
+            chartTimer = t
         }
         let now = Date().timeIntervalSince1970
         fpsWindow.append(now)
@@ -356,6 +362,7 @@ final class AppState {
     }
 
     private func flushHistory() {
+        chartNow = Date()
         guard historyDirty else { return }
         historyDirty = false
         history = liveHistory
