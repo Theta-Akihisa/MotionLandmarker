@@ -53,17 +53,33 @@ class Playback:
         self.index = 0
         self.playing = False
         self.timer = QTimer()
+        self.timer.setSingleShot(True)      # フレームごとに次の間隔を決めて撃ち直す（可変フレーム間隔に対応）
+        self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self._step)
         self.timeline: Timeline | None = None
         self.size = (16, 9)
 
     @property
     def duration(self) -> float:
+        t = self.timeline
+        if t is not None and len(t):
+            return float(t.timestamps[-1] - t.first_timestamp) / 1000.0
         return self.frames / self.fps if self.fps else 0.0
 
     @property
     def seconds(self) -> float:
+        """再生位置（秒）．CSV の timestamp_ms があればそれを使う（動画のフレーム番号 == CSV の行番号）."""
+        t = self.timeline
+        if t is not None and 0 <= self.index < len(t):
+            return float(t.timestamps[self.index] - t.first_timestamp) / 1000.0
         return self.index / self.fps if self.fps else 0.0
+
+    def _interval_ms(self) -> int:
+        """次のフレームまでの間隔（ms）．timestamp_ms があればその差，無ければ 1 / fps."""
+        t = self.timeline
+        if t is not None and 0 <= self.index + 1 < len(t):
+            return max(1, int(t.timestamps[self.index + 1] - t.timestamps[self.index]))
+        return max(1, int(round(1000.0 / self.fps)))
 
     def open(self, url: Path):
         self.close()
@@ -115,7 +131,7 @@ class Playback:
         if self.frames and self.index >= self.frames - 1:
             self.seek(0)
         self.playing = True
-        self.timer.start(max(1, int(round(1000.0 / self.fps))))
+        self.timer.start(self._interval_ms())
 
     def pause(self):
         self.playing = False
@@ -148,6 +164,8 @@ class Playback:
         self.index = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
         self.on_frame(None if self.variant == "hidden" else frame)
         self.on_tick()
+        if self.playing:
+            self.timer.start(self._interval_ms())
 
     def close(self):
         self.pause()
@@ -178,6 +196,8 @@ class MainWindow(QMainWindow):
         self.importing = False
         self.switching_mode = False
         self.worker_ready = False
+        self.frame_seen = False          # カメラの実フレームを 1 枚以上処理したか（録画サイズが決まる）
+        self.history_dirty = False
         self.last_overlay: Path | None = None
         self.playback = Playback(self._on_playback_frame, self._on_playback_tick)
         self.t0 = time.monotonic()
@@ -464,6 +484,8 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _on_result(self, image, frame, metrics, recorded):
+        self.frame_seen = True
+        self.history_dirty = True
         if self.playback.url is None:
             self.video.set_bgr(image)
             if self.live_style == "hidden":
@@ -565,9 +587,14 @@ class MainWindow(QMainWindow):
             return
         if self.playback.url is not None:
             self._stop_playback()
+        if not self.frame_seen:
+            self.msg_label.setText("カメラの映像が届いてから録画を始めてください")
+            return
         stem = "live_" + datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
-            self.wt.worker.pipeline.fps_hint = 30.0
+            # mp4 は固定フレームレートでしか書けないため，実測の推論レートを使う（正確な時刻は CSV の timestamp_ms）
+            fps = len(self.inference_times) / 2.0
+            self.wt.worker.pipeline.fps_hint = max(5.0, min(60.0, fps)) if fps > 0 else 30.0
             self.wt.worker.pipeline.start_recording(self.output_root, stem, self.person_mode == MODE_MULTI)
         except Exception as e:
             self.msg_label.setText(f"録画を開始できません: {e}")
@@ -673,7 +700,7 @@ class MainWindow(QMainWindow):
             if t is None:
                 w.update_series(np.zeros(0), {})
             else:
-                w.update_series(t.seconds, t.values, 0)
+                w.update_series(t.seconds, t.values, 0, full=True)
 
     def _zoom_all(self):
         if self.playback.url is None:
@@ -707,8 +734,10 @@ class MainWindow(QMainWindow):
         if self.playback.url is not None:
             return
         now = time.monotonic() - self.t0
+        dirty, self.history_dirty = self.history_dirty, False
         for w in self.graph_panel.visible_widgets():
-            w.update_series(self.history.times, self.history.values, self.history.start_index)
+            if dirty:
+                w.update_series(self.history.times, self.history.values, self.history.start_index)
             w.set_x_range(now - LIVE_WINDOW, now)
             w.set_now(now)
 
@@ -769,7 +798,7 @@ class MainWindow(QMainWindow):
         if sys.platform == "darwin":
             subprocess.Popen(["open", "-R", str(target)] if self.last_overlay else ["open", str(target)])
         elif sys.platform == "win32":
-            subprocess.Popen(["explorer", "/select,", str(target)] if self.last_overlay else ["explorer", str(target)])
+            subprocess.Popen(["explorer", f"/select,{target}"] if self.last_overlay else ["explorer", str(target)])
         else:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output_root)))
 

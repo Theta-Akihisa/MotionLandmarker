@@ -72,7 +72,7 @@ class ChartWidget(QWidget):
         self.plot.getPlotItem().getViewBox().setLimits(yMin=lo - pad, yMax=hi + pad)
         self.curves = {}
         for k in chart.kinds:
-            c = pg.PlotCurveItem(pen=pg.mkPen(_qcolor(Palette.for_kind(k)), width=2), connect="finite")
+            c = pg.PlotDataItem(pen=pg.mkPen(_qcolor(Palette.for_kind(k)), width=2), connect="finite")
             self.plot.addItem(c)
             self.curves[k] = c
         self.now_line = pg.InfiniteLine(angle=90, pen=pg.mkPen(QColor("red"), width=2.5), movable=False)
@@ -93,10 +93,20 @@ class ChartWidget(QWidget):
         self.curves[kind].setVisible(on)
         self.legend_items[kind].setVisible(on)
 
-    def update_series(self, times: np.ndarray, values: dict[str, np.ndarray], index_offset: int = 0):
-        """times（秒）と values（kind -> float32，NaN = 未検出）を描く．間引きは通算番号で位相を固定する."""
+    def update_series(self, times: np.ndarray, values: dict[str, np.ndarray], index_offset: int = 0,
+                      full: bool = False):
+        """times（秒）と values（kind -> float32，NaN = 未検出）を描く．
+
+        ライブ（full=False）は通算番号で位相を固定した間引き．
+        再生（full=True）は全点を渡し，表示範囲に応じた間引き（peak）とクリップを pyqtgraph に任せる
+        （ズームしても点が足りなくならない）．
+        """
         n = len(times)
-        stride = max(1, n // MAX_POINTS)
+        for c in self.curves.values():
+            c.setDownsampling(auto=full, method="peak")
+            c.setClipToView(full)
+        stride = 1 if full else max(1, n // MAX_POINTS)
+        sel = None
         if stride > 1:
             # (i + offset) % stride == 0 の点だけ残す．NaN 境界は保てないが線の途切れは stride 以内の誤差
             sel = ((np.arange(n) + index_offset) % stride) == 0
