@@ -9,9 +9,18 @@ dependencies = [
     "PySide6>=6.8",
     "pyqtgraph>=0.13",
     "numpy",
-    # opencv-python（非 headless）は独自の Qt を同梱して PySide6 と衝突するため headless を使う
-    "opencv-python-headless",
+    # OpenCV は 1 系統だけ入れる．mediapipe が要求する opencv-contrib-python（非 headless）は
+    # 独自の Qt を同梱して PySide6 と衝突し，別の cv2 と同時に入ると Windows で DLL が競合して
+    # 「Unknown C++ exception from OpenCV code」になる．下の override で mediapipe 側の要求を無効化し，
+    # headless の contrib（4.x 系）だけを使う．
+    "opencv-contrib-python-headless>=4.10,<5",
     "mediapipe<1",
+]
+
+[tool.uv]
+# mediapipe の opencv-contrib-python への依存を無効化する（常に偽のマーカーに置き換える）
+override-dependencies = [
+    "opencv-contrib-python; sys_platform == 'never'",
 ]
 
 [project.optional-dependencies]
