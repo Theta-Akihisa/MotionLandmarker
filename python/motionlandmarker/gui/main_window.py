@@ -21,6 +21,7 @@ from .. import metrics as M
 from ..detectors import MODE_SINGLE, MODE_MULTI
 from ..renderer import DrawOptions
 from ..timeline import Timeline, recording_parts, variant_path
+from .app_icon import app_icon, set_windows_app_id
 from .camera import Camera
 from .graphs import GraphPanel
 from .video_view import VideoView
@@ -821,9 +822,11 @@ class MainWindow(QMainWindow):
 
 
 def run() -> int:
+    set_windows_app_id()
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP)
     app.setOrganizationName(ORG)
+    app.setWindowIcon(app_icon())
     win = MainWindow()
     win.show()
     return app.exec()

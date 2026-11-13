@@ -273,6 +273,6 @@ xattr -dr com.apple.quarantine /Applications/MotionLandmarker.app
 | `MotionLandmarker/` | Swift ソース |
 | `landmarker/` | Python サイドカー（`landmarker.py`，`pyproject.toml`，`uv.lock`，`models/`） |
 | `landmarker/models/holistic_landmarker.task` | MediaPipe のモデル．無ければ初回起動時にダウンロードされる |
-| `design/icon/` | アプリアイコンの元データ（`AppIcon.svg`，Icon Composer 用の背景と線の層） |
+| `design/icon/` | アプリアイコンの元データ（`AppIcon.svg`，Windows 用の `AppIcon-windows.svg`，Icon Composer 用の背景と線の層） |
 | `scripts/release.sh` | 配布用 .app のビルドと zip 化 |
 | `.github/workflows/release.yml` | タグの push で GitHub Releases に公開する |
