@@ -107,3 +107,4 @@ YOLO の重み（yolo11n.pt，約 5 MB）は初回に自動でダウンロード
 | `motionlandmarker/pipeline.py` | 検出 → 指標 → 描画 → 録画の流れ |
 | `motionlandmarker/importer.py` | 動画ファイルの処理 |
 | `motionlandmarker/gui/` | PySide6 の GUI（カメラ，ワーカー，グラフ，映像表示，メインウィンドウ） |
+| `motionlandmarker/resources/` | アプリのアイコン（Swift 版と同じ図柄．macOS は `.png`，Windows は `.ico`．PyInstaller の `--icon` にも使える） |
