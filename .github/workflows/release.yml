@@ -14,7 +14,7 @@ jobs:
     # デプロイメントターゲットが macOS 26 のため，Xcode 26 を持つランナーが必要
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app && xcodebuild -version
@@ -23,7 +23,7 @@ jobs:
         run: DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/release.sh
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.zip
           generate_release_notes: true
