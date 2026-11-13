@@ -21,8 +21,10 @@ MediaPipe には macOS 向けの Swift SDK が無いため，アプリが `landm
 
 ### コマンドラインから
 
+リポジトリのルート（`MotionLandmarker.xcodeproj` があるディレクトリ）で実行します．
+中にある Swift ソースの `MotionLandmarker/` ディレクトリではありません．
+
 ```bash
-cd MotionLandmarker
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   xcodebuild -project MotionLandmarker.xcodeproj -scheme MotionLandmarker \
   -configuration Debug -derivedDataPath build build
@@ -177,6 +179,62 @@ build/Build/Products/Debug/MotionLandmarker.app/Contents/MacOS/MotionLandmarker 
 その場合は `--check` / `--import` を一度実行するか（アプリと同じ方法で直します），
 `uv sync --reinstall-package opencv-contrib-python` を実行してください．
 
+## 配布
+
+### 配布用の .app をビルドする
+
+```bash
+scripts/release.sh
+```
+
+Release 構成でビルドし，カメラのエンタイトルメントを付けて署名し直したうえで
+`dist/MotionLandmarker-<版数>.zip` を作ります．版数は Xcode の `MARKETING_VERSION` です．
+
+- 署名は既定で ad-hoc です．Developer ID で署名する場合は証明書の名前を指定します．
+
+  ```bash
+  SIGN_IDENTITY="Developer ID Application: ..." scripts/release.sh
+  ```
+
+- Xcode が `/Applications/Xcode.app` 以外にある場合は `DEVELOPER_DIR` を指定します．
+- 公証（notarization）は行いません．
+
+### GitHub Releases で公開する
+
+`v` で始まるタグを push すると，GitHub Actions（`.github/workflows/release.yml`，macOS 26 ランナー）が
+`scripts/release.sh` を実行し，できた zip を GitHub Releases に添付します．
+
+```bash
+git tag v1.2.3
+```
+
+```bash
+git push origin v1.2.3
+```
+
+タグ名（`v` を除く）は zip のファイル名にだけ使われます．アプリの版数（`MARKETING_VERSION`）は
+変わらないので，必要なら Xcode で先に更新してからタグを打ってください．
+
+### 配布版のインストール（利用者向け）
+
+1. zip を展開し，`MotionLandmarker.app` を `/Applications` などへ置く
+2. [uv](https://docs.astral.sh/uv/) をインストールする（未導入の場合）
+
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+3. ad-hoc 署名のため，初回は Gatekeeper に止められる．Finder で右クリック →「開く」を選ぶか，次を実行する
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/MotionLandmarker.app
+   ```
+
+4. 初回起動時に Python 依存関係の取得と MediaPipe モデルのダウンロードが走る（要ネットワーク）
+5. カメラの許可ダイアログで「許可」を押す．拒否した場合は「[カメラの許可](#カメラの許可システム設定での操作)」を参照
+6. 以前の版から更新した場合は署名が変わるため，カメラが拒否されることがある．
+   「[スイッチがオンなのに拒否される場合](#スイッチがオンなのに拒否される場合)」の `tccutil reset` を実行して起動し直す
+
 ## ディレクトリ
 
 | パス | 内容 |
@@ -184,3 +242,5 @@ build/Build/Products/Debug/MotionLandmarker.app/Contents/MacOS/MotionLandmarker 
 | `MotionLandmarker/` | Swift ソース |
 | `landmarker/` | Python サイドカー（`landmarker.py`，`pyproject.toml`，`uv.lock`，`models/`） |
 | `landmarker/models/holistic_landmarker.task` | MediaPipe のモデル．無ければ初回起動時にダウンロードされる |
+| `scripts/release.sh` | 配布用 .app のビルドと zip 化 |
+| `.github/workflows/release.yml` | タグの push で GitHub Releases に公開する |
