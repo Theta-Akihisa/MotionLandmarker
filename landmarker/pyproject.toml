@@ -6,6 +6,12 @@ dependencies = [
     "lap>=0.5.14",
     "mediapipe<1",
     "numpy>=2.5.4",
-    "opencv-python-headless>=5.0.0.93",
+    "opencv-contrib-python>=5.0.0.93",
     "ultralytics>=8.4.211",
 ]
+
+# cv2 を提供するパッケージを opencv-contrib-python（mediapipe の依存）の1つにまとめる．
+# opencv-python（ultralytics の依存）や -headless が同居すると同じ cv2/ のファイルを奪い合い，
+# 版がずれると別の版が黙って読み込まれる．マーカーが常に偽になる指定で opencv-python を外す．
+[tool.uv]
+override-dependencies = ["opencv-python; sys_platform == 'never'"]

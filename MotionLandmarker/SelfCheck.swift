@@ -26,6 +26,8 @@ nonisolated enum SelfCheck {
         client.onReady = { ready.signal() }
         client.onExit = { code, log in if code != 0 { print("sidecar exited \(code)\n\(log)") } }
         let pipeline = LandmarkPipeline(client: client)
+        // uv run の暗黙の同期では cv2 が壊れることがあるため，アプリと同じ sync を先に行う
+        do { try SidecarBootstrap.sync(uv: uv, project: sidecar) } catch { print("sidecar sync failed: \(error)"); return 1 }
         do { try client.start(uv: uv, project: sidecar) } catch { print("sidecar start failed: \(error)"); return 1 }
         guard ready.wait(timeout: .now() + 120) == .success else { print("sidecar did not become ready"); return 1 }
         // アプリ内と同じ条件にするため，環境変数 ML_FAKE_CAMERA に動画を指定すると
@@ -90,6 +92,8 @@ nonisolated enum SelfCheck {
             stats.add(frame, recorded: recorded)
             done.signal()
         }
+        // uv run の暗黙の同期では cv2 が壊れることがあるため，アプリと同じ sync を先に行う
+        do { try SidecarBootstrap.sync(uv: uv, project: sidecar) } catch { print("sidecar sync failed: \(error)"); return 1 }
         do { try client.start(uv: uv, project: sidecar) } catch { print("sidecar start failed: \(error)"); return 1 }
         guard ready.wait(timeout: .now() + 120) == .success else { print("sidecar did not become ready"); return 1 }
 
