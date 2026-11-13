@@ -172,6 +172,11 @@ build/Build/Products/Debug/MotionLandmarker.app/Contents/MacOS/MotionLandmarker 
 送受信したフレーム数，検出数，出力先が表示されます．
 第2引数はサイドカーのディレクトリ（リポジトリ内の `landmarker/` を直接使う），第3引数は出力先です．
 
+`landmarker/` で手動で `uv sync` を実行すると，以前の版で入った `opencv-python` / `opencv-python-headless` を
+取り除く際に共有している `cv2/` のファイルまで消え，`import cv2` が失敗することがあります．
+その場合は `--check` / `--import` を一度実行するか（アプリと同じ方法で直します），
+`uv sync --reinstall-package opencv-contrib-python` を実行してください．
+
 ## ディレクトリ
 
 | パス | 内容 |

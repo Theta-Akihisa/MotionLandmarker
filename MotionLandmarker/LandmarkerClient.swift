@@ -83,14 +83,14 @@ nonisolated enum SidecarBootstrap {
     }
 
     /// `uv sync` を実行して依存関係を揃える（初回は数十秒かかる）。
-    /// opencv-contrib-python は毎回入れ直す。以前の版は opencv-python / -headless も入れており，
-    /// それらは同じ cv2/ のファイルを共有するため，sync がそれらを取り除くと cv2 本体まで消える。
-    /// 入れ直しは uv のキャッシュから行われ，一瞬で終わる（オフラインでも可）。
     static func sync(uv: URL, project: URL) throws {
         let p = Process()
         p.executableURL = uv
-        p.arguments = ["sync", "--project", project.path, "--python", "3.12",
-                       "--reinstall-package", "opencv-contrib-python"]
+        var arguments = ["sync", "--project", project.path, "--python", "3.12"]
+        if needsOpenCVReinstall(project: project) {
+            arguments += ["--reinstall-package", "opencv-contrib-python"]
+        }
+        p.arguments = arguments
         p.environment = environment(uv: uv)
         let pipe = Pipe()
         p.standardOutput = pipe
@@ -101,6 +101,33 @@ nonisolated enum SidecarBootstrap {
         if p.terminationStatus != 0 {
             throw SidecarError.syncFailed(String(data: out, encoding: .utf8) ?? "")
         }
+    }
+
+    /// opencv-contrib-python を入れ直す必要があるか。
+    /// 以前の版は opencv-python / -headless も入れていた。これらは opencv-contrib-python と
+    /// 同じ cv2/ のファイル（本体の .so を含む）を共有するため，sync が取り除くと cv2 本体まで消える。
+    /// それらが .venv に残っているとき，または cv2 本体が欠けているとき（移行の中断など）だけ入れ直す。
+    /// 毎回入れ直すと，uv のキャッシュが無いオフライン環境で sync が失敗するため。
+    static func needsOpenCVReinstall(project: URL) -> Bool {
+        let fm = FileManager.default
+        let lib = project.appendingPathComponent(".venv/lib", isDirectory: true)
+        guard let pythons = try? fm.contentsOfDirectory(atPath: lib.path) else { return false }
+        for python in pythons where python.hasPrefix("python") {
+            let site = lib.appendingPathComponent(python, isDirectory: true)
+                .appendingPathComponent("site-packages", isDirectory: true)
+            guard let entries = try? fm.contentsOfDirectory(atPath: site.path) else { continue }
+            let distInfos = entries.filter { $0.hasSuffix(".dist-info") }
+            if distInfos.contains(where: { $0.hasPrefix("opencv_python-") || $0.hasPrefix("opencv_python_headless-") }) {
+                return true
+            }
+            if distInfos.contains(where: { $0.hasPrefix("opencv_contrib_python-") }) {
+                let cv2 = site.appendingPathComponent("cv2", isDirectory: true)
+                let files = (try? fm.contentsOfDirectory(atPath: cv2.path)) ?? []
+                let hasNative = files.contains { $0.hasPrefix("cv2") && $0.hasSuffix(".so") }
+                if !hasNative || !files.contains("__init__.py") { return true }
+            }
+        }
+        return false
     }
 
     static func environment(uv: URL) -> [String: String] {
