@@ -83,10 +83,14 @@ nonisolated enum SidecarBootstrap {
     }
 
     /// `uv sync` を実行して依存関係を揃える（初回は数十秒かかる）。
+    /// opencv-contrib-python は毎回入れ直す。以前の版は opencv-python / -headless も入れており，
+    /// それらは同じ cv2/ のファイルを共有するため，sync がそれらを取り除くと cv2 本体まで消える。
+    /// 入れ直しは uv のキャッシュから行われ，一瞬で終わる（オフラインでも可）。
     static func sync(uv: URL, project: URL) throws {
         let p = Process()
         p.executableURL = uv
-        p.arguments = ["sync", "--project", project.path, "--python", "3.12"]
+        p.arguments = ["sync", "--project", project.path, "--python", "3.12",
+                       "--reinstall-package", "opencv-contrib-python"]
         p.environment = environment(uv: uv)
         let pipe = Pipe()
         p.standardOutput = pipe
