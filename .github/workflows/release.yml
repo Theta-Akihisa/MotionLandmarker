@@ -31,8 +31,11 @@ jobs:
             ## インストール
             1. zip を展開し，`MotionLandmarker.app` を `/Applications` などへ置く
             2. 実行には [uv](https://docs.astral.sh/uv/) が必要（`curl -LsSf https://astral.sh/uv/install.sh | sh`）
-            3. ad-hoc 署名のため初回は Gatekeeper に止められる．右クリック →「開く」，
-               または `xattr -dr com.apple.quarantine /Applications/MotionLandmarker.app` を実行する
+            3. ad-hoc 署名のため初回は Gatekeeper に止められる（macOS 15 以降は右クリック →「開く」では開けない）．
+               ダブルクリックして出たダイアログで「完了」を押し，システム設定 > プライバシーとセキュリティ を
+               一番下までスクロールして「このまま開く」を押す（開こうとしてから 1 時間ほどしか表示されない）．
+               または `xattr -dr com.apple.quarantine /Applications/MotionLandmarker.app` を実行してから開く．
+               詳しくは README の「初回起動で止められる場合（Gatekeeper）」を参照
             4. 初回起動時に Python 依存関係の取得と MediaPipe モデルのダウンロードが走る（要ネットワーク）
             5. カメラの許可ダイアログで「許可」を押す．拒否してしまった場合は
                システム設定 > プライバシーとセキュリティ > カメラ で MotionLandmarker をオンにして起動し直す
