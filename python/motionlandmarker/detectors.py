@@ -19,7 +19,7 @@ MODEL_BASE = "https://storage.googleapis.com/mediapipe-models/"
 MODELS = {
     "holistic_landmarker.task": MODEL_BASE + "holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
 }
-MAX_PEOPLE = 4
+MAX_PEOPLE = 5
 
 MODE_SINGLE = 1
 MODE_MULTI = 2
@@ -101,6 +101,53 @@ class SingleDetector:
         self.lm.close()
 
 
+class SlotAssigner:
+    """追跡 ID（YOLO / ByteTrack）→ 人物番号（1〜MAX_PEOPLE）の対応を保つ．
+
+    番号の決め方:
+    - 初めて現れた追跡 ID には，空いている番号のうち最小のものを割り当てる．
+    - 一度割り当てた番号は，その ID が見えなくなっても HOLD_FRAMES フレームの間は予約したままにし，
+      他の人へは回さない（一時的に見失った人が同じ追跡 ID で戻れば同じ番号になる）．
+    - 予約期間を過ぎた番号は空きに戻る．空きが無いときは，今のフレームに映っていない ID のうち
+      最も長く見えていないものの番号を譲り受ける（映っている人の番号は奪わない）．
+    - 追跡 ID がまだ付いていない検出（負の仮 ID）は予約しない（次のフレームで番号を空ける）．
+    追跡器が同じ人に新しい ID を振り直した場合は別人として扱う（新しい番号になる）．
+    """
+
+    HOLD_FRAMES = 60
+
+    def __init__(self, max_slots: int = MAX_PEOPLE):
+        self.max_slots = max_slots
+        self.slots: dict[int, list[int]] = {}   # 追跡 ID -> [人物番号, 最後に見えたフレーム]
+        self.frame_no = 0
+
+    def update(self, ids: list[int]) -> dict[int, int]:
+        """このフレームに映っている追跡 ID の並びから，ID -> 人物番号 を返す（番号が足りない ID は含まれない）."""
+        self.frame_no += 1
+        current = set(ids)
+        for tid in [t for t, (_, seen) in self.slots.items()
+                    if t not in current and (t < 0 or self.frame_no - seen > self.HOLD_FRAMES)]:
+            del self.slots[tid]
+        out: dict[int, int] = {}
+        for tid in ids:
+            entry = self.slots.get(tid)
+            if entry is None:
+                used = {s for s, _ in self.slots.values()}
+                free = [s for s in range(1, self.max_slots + 1) if s not in used]
+                if free:
+                    slot = free[0]
+                else:
+                    idle = [t for t in self.slots if t not in current]
+                    if not idle:
+                        continue
+                    victim = min(idle, key=lambda t: self.slots[t][1])
+                    slot = self.slots.pop(victim)[0]
+                entry = self.slots[tid] = [slot, self.frame_no]
+            entry[1] = self.frame_no
+            out[tid] = entry[0]
+        return out
+
+
 class MultiDetector:
     """YOLO で人物の枠を検出・追跡し，人物ごとに切り出して Holistic を適用する（複数人）."""
 
@@ -125,6 +172,7 @@ class MultiDetector:
             self.device = "cpu"
         self.yolo = YOLO(str(models_dir() / "yolo11n.pt"))  # 無ければ ultralytics が同じ場所へダウンロードする
         self.holistics: dict[int, list] = {}
+        self.assigner = SlotAssigner()
         self.frame_no = 0
 
     def _holistic(self, tid: int):
@@ -143,12 +191,15 @@ class MultiDetector:
         mp, _, _ = _mp()
         self.frame_no += 1
         h, w = rgb.shape[:2]
+        # 検出数は信頼度の高い順に最大 MAX_PEOPLE 人まで
         res = self.yolo.track(rgb[:, :, ::-1], persist=True, classes=[0], conf=self.MIN_CONF,
-                              device=self.device, verbose=False, imgsz=640)[0]
-        people: list[tuple[float, Person]] = []
+                              device=self.device, verbose=False, imgsz=640, max_det=MAX_PEOPLE)[0]
+        people: list[tuple[float, Person, int]] = []
         if res.boxes is not None and len(res.boxes) > 0:
             boxes = res.boxes.xyxy.cpu().numpy()
-            ids = res.boxes.id.cpu().numpy().astype(int) if res.boxes.id is not None else range(len(boxes))
+            # 追跡 ID が未確定のフレームでは負の仮 ID を使う（本物の ID と衝突させない）
+            ids = ([int(t) for t in res.boxes.id.cpu().numpy()] if res.boxes.id is not None
+                   else [-1 - i for i in range(len(boxes))])
             for (x1, y1, x2, y2), tid in zip(boxes, ids):
                 if (y2 - y1) / h < self.MIN_BOX_HEIGHT:
                     continue
@@ -175,10 +226,18 @@ class MultiDetector:
                     a[:, 1] = oy + a[:, 1] * ky
                     a[:, 2] = a[:, 2] * kx
 
-                people.append((abs((x1 + x2) / 2 / w - 0.5), _to_person(r, to_full)))
+                person = _to_person(r, to_full)
+                person.bbox = (float(x1 / w), float(y1 / h), float((x2 - x1) / w), float((y2 - y1) / h))
+                people.append((abs((x1 + x2) / 2 / w - 0.5), person, tid))
         self._drop_stale()
+        # 人物番号は骨格が取れた人物（= Box を出す人物）にだけ割り当てる（取れなかった人は「見えていない」扱い）
+        slots = self.assigner.update([tid for _, _, tid in people])
+        for _, p, tid in people:
+            p.slot = slots.get(tid, 0)
+        people = [(c, p) for c, p, _ in people if p.slot > 0]
         if not people:
             return Person(), []
+        # 先頭（Frame.person）は従来どおり中央の人物．metrics CSV はこの人物の値
         people.sort(key=lambda t: t[0])
         persons = [p for _, p in people][:MAX_PEOPLE]
         return persons[0], persons[1:]
@@ -187,6 +246,7 @@ class MultiDetector:
         for lm, _ in self.holistics.values():
             lm.close()
         self.holistics.clear()
+        self.assigner = SlotAssigner()
 
 
 class Detector:

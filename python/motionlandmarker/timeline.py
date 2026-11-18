@@ -1,7 +1,8 @@
-"""録画の再生時に波形を出すための指標の時系列（Swift 版 PlaybackTimeline.swift の移植）."""
+"""録画の再生時に波形を出すための指標の時系列（Swift 版 PlaybackTimeline.swift の移植）と，複数人の録画の人物ごとの Box."""
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import numpy as np
@@ -113,3 +114,79 @@ class Timeline:
             for k in M.KINDS:
                 vals[k].append(m.get(k, np.nan))
         return cls(np.array(ts, np.int64), {k: np.array(v, np.float32) for k, v in vals.items()})
+
+
+def _json_points(rows, cols: int) -> np.ndarray:
+    if not rows:
+        return np.zeros((0, cols), np.float64)
+    keys = ("x", "y", "z", "visibility")[:cols]
+    return np.array([[r.get(k, 0.0) for k in keys] for r in rows], np.float64)
+
+
+class PeopleTrack:
+    """複数人モードの録画（{stem}_people.json）の人物ごとの Box と指標．
+
+    frames[i] は動画の i フレーム目（== CSV の行）に写っている人物（Person．slot と bbox 付き）．
+    slot_values は人物番号 -> 指標の時系列（kind -> float32，NaN = その人がいない / 未検出）．
+    people.json にはワールド座標が無いため，人物ごとの体のヨーは出ない（ロールは画像座標から出す）．
+    """
+
+    def __init__(self, timestamps: np.ndarray, frames: list[list[Person]], slot_values: dict[int, dict[str, np.ndarray]]):
+        self.timestamps = timestamps
+        self.frames = frames
+        self.slot_values = slot_values
+
+    def __len__(self):
+        return len(self.frames)
+
+    def people_at(self, index: int) -> list[Person]:
+        return self.frames[index] if 0 <= index < len(self.frames) else []
+
+    @classmethod
+    def load_for_video(cls, video: Path) -> "PeopleTrack | None":
+        """people.json が無い，または人物番号・Box の無い古い録画なら None（従来の表示にフォールバック）."""
+        parts = recording_parts(video)
+        if parts is None:
+            return None
+        stem, root, _ = parts
+        path = root / "json" / stem / f"{stem}_people.json"
+        if not path.exists():
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                rows = json.load(f)
+        except (OSError, ValueError):
+            return None
+        return cls.from_rows(rows)
+
+    @classmethod
+    def from_rows(cls, rows: list) -> "PeopleTrack | None":
+        ts, frames = [], []
+        any_slot = False
+        for row in rows:
+            people = []
+            for d in row.get("people") or []:
+                slot, bbox = d.get("slot"), d.get("bbox")
+                if not isinstance(slot, (int, float)) or int(slot) <= 0 or not bbox or len(bbox) != 4:
+                    continue
+                slot = int(slot)
+                any_slot = True
+                people.append(Person(pose=_json_points(d.get("pose"), 4), face=_json_points(d.get("face"), 3),
+                                     left_hand=_json_points(d.get("left"), 3), right_hand=_json_points(d.get("right"), 3),
+                                     bbox=tuple(float(v) for v in bbox), slot=slot))
+            ts.append(int(row.get("timestamp_ms", 0)))
+            frames.append(sorted(people, key=lambda p: p.slot))
+        if not any_slot:
+            return None
+        slots = sorted({p.slot for fr in frames for p in fr})
+        vals = {s: {k: np.full(len(frames), np.nan, np.float32) for k in M.KINDS} for s in slots}
+        prev: dict[int, Frame] = {}
+        for i, (t, people) in enumerate(zip(ts, frames)):
+            cur = {}
+            for p in people:
+                fr = Frame(timestamp_ms=t, person=p)
+                for k, v in M.compute(fr, prev.get(p.slot)).items():
+                    vals[p.slot][k][i] = v
+                cur[p.slot] = fr
+            prev = cur
+        return cls(np.array(ts, np.int64), frames, vals)

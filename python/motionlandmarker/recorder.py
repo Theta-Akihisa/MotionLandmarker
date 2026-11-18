@@ -4,6 +4,11 @@ results_data/
   csv/{stem}/{stem}_{face,hand,pose,metrics}.csv
   json/{stem}/{stem}_{face,hand,pose}.json（複数人モードは {stem}_people.json も）
   video_raw / video_overlay / video_skeleton/{stem}_xxx.mp4
+
+{stem}_people.json の各人物エントリは pose / face / left / right に加えて，
+  "bbox": [x, y, w, h]（人物の枠．元画像に対する正規化 0〜1）
+  "slot": 人物番号（1 始まり．フレームをまたいで同じ人は同じ番号）
+を持つ（番号の無い古い録画には無い）．並びは従来どおり先頭が中央の人物．
 """
 from __future__ import annotations
 
@@ -72,6 +77,15 @@ def _pose_json(a: np.ndarray):
     return [{"x": float(r[0]), "y": float(r[1]), "z": float(r[2]), "visibility": float(r[3])} for r in a]
 
 
+def _person_json(q: Person) -> dict:
+    d = {"pose": _pose_json(q.pose), "face": _xyz_json(q.face, FACE_COUNT),
+         "left": _xyz_json(q.left_hand, HAND_COUNT), "right": _xyz_json(q.right_hand, HAND_COUNT)}
+    if q.bbox is not None and q.slot > 0:
+        d["bbox"] = [float(v) for v in q.bbox]
+        d["slot"] = int(q.slot)
+    return d
+
+
 class Recorder:
     def __init__(self, output_root: Path, stem: str, size: tuple[int, int], fps: float = 30.0,
                  multi_person: bool = False):
@@ -134,10 +148,7 @@ class Recorder:
         self._json_pose.append({"frame": i, "timestamp_ms": ts, "landmarks": _pose_json(p.pose)})
         if self.multi_person:
             people = ([p] if p.has_pose else []) + list(frame.others)
-            self._json_people.append({"frame": i, "timestamp_ms": ts, "people": [
-                {"pose": _pose_json(q.pose), "face": _xyz_json(q.face, FACE_COUNT),
-                 "left": _xyz_json(q.left_hand, HAND_COUNT), "right": _xyz_json(q.right_hand, HAND_COUNT)}
-                for q in people]})
+            self._json_people.append({"frame": i, "timestamp_ms": ts, "people": [_person_json(q) for q in people]})
         self.frame_count += 1
 
     def finish(self):

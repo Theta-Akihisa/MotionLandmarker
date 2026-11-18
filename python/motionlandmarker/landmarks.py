@@ -18,6 +18,9 @@ class Person:
     face: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float64))
     left_hand: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float64))
     right_hand: np.ndarray = field(default_factory=lambda: np.zeros((0, 3), np.float64))
+    # 複数人モードのみ：人物の枠（元画像に対する正規化 x, y, w, h）と人物番号（1 始まり．0 = 番号なし）
+    bbox: tuple[float, float, float, float] | None = None
+    slot: int = 0
 
     @property
     def has_pose(self) -> bool: return len(self.pose) == POSE_COUNT
@@ -35,6 +38,10 @@ class Frame:
     timestamp_ms: int
     person: Person = field(default_factory=Person)
     others: list[Person] = field(default_factory=list)
+
+    def numbered_people(self) -> list[Person]:
+        """人物番号のある人物（複数人モード）を番号順に返す．1 人モードや番号の無い古い録画では空."""
+        return sorted((p for p in [self.person, *self.others] if p.slot > 0), key=lambda p: p.slot)
 
 
 # --- 接続定義（MediaPipe 準拠．pose は video2landmark の draw_video.py と同じ規則） ---

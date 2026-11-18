@@ -14,7 +14,7 @@ from ..pipeline import Pipeline
 
 
 class Worker(QObject):
-    result = Signal(object, object, object, int)      # image(bgr|None), Frame, metrics, recorded
+    result = Signal(object)                            # pipeline.Processed
     ready = Signal()
     mode_changed = Signal(int)
     failed = Signal(str)
@@ -41,7 +41,7 @@ class Worker(QObject):
     @Slot(object, int)
     def process(self, bgr, ms: int):
         try:
-            self.result.emit(*self.pipeline.process(bgr, ms))
+            self.result.emit(self.pipeline.process(bgr, ms))
         except Exception as e:
             # 1 フレームの失敗で止めない（次のフレームは処理する）．原因は画面に出す
             self.failed.emit(f"{type(e).__name__}: {str(e).strip().splitlines()[-1] if str(e).strip() else ''}")
@@ -70,7 +70,7 @@ class Worker(QObject):
             r = import_video(Path(video), Path(output_root), self.pipeline, multi,
                              progress=lambda d, t: self.import_progress.emit(d, t),
                              is_cancelled=self.cancel_import.is_set,
-                             on_frame=lambda img, fr, m, rec: self.result.emit(img, fr, m, rec))
+                             on_frame=self.result.emit)
             self.import_finished.emit(r, "")
         except Exception as e:
             self.import_finished.emit(None, str(e))

@@ -20,7 +20,7 @@ def import_video(video: Path, output_root: Path, pipeline: Pipeline, multi_perso
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     pipeline.fps_hint = fps
-    pipeline.reset_timing()
+    pipeline.reset_tracking()   # ライブで振った人物番号・追跡を持ち込まない
     stem = Path(video).stem
     sent = 0
     recorder_started = False
@@ -36,7 +36,7 @@ def import_video(video: Path, output_root: Path, pipeline: Pipeline, multi_perso
             result = pipeline.process(frame, ts)
             sent += 1
             if on_frame is not None:
-                on_frame(*result)
+                on_frame(result)
             if not recorder_started:
                 # 録画サイズは最初のフレームから決まる（カメラと同じ流れ）．先頭フレームは記録に含めない
                 pipeline.start_recording(output_root, stem, multi_person)
@@ -45,6 +45,7 @@ def import_video(video: Path, output_root: Path, pipeline: Pipeline, multi_perso
                 progress(sent, max(total, sent))
     finally:
         cap.release()
+        pipeline.reset_tracking()
     if sent == 0:
         raise RuntimeError("動画からフレームを読み出せません")
     r = pipeline.stop_recording()

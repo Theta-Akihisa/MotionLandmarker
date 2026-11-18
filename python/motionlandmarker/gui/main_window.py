@@ -12,15 +12,16 @@ import cv2
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, QSettings, QUrl, Signal, QMetaObject, Q_ARG, Slot
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
                                QComboBox, QCheckBox, QPushButton, QSplitter, QScrollArea, QSlider,
                                QFileDialog, QMessageBox, QToolButton, QProgressBar, QSizePolicy,
                                QButtonGroup, QFrame)
 
 from .. import metrics as M
-from ..detectors import MODE_SINGLE, MODE_MULTI
+from .. import renderer
+from ..detectors import MODE_SINGLE, MODE_MULTI, MAX_PEOPLE
 from ..renderer import DrawOptions
-from ..timeline import Timeline, recording_parts, variant_path
+from ..timeline import PeopleTrack, Timeline, recording_parts, variant_path
 from .app_icon import app_icon, set_windows_app_id
 from .camera import Camera
 from .graphs import GraphPanel
@@ -39,7 +40,11 @@ def default_output_root() -> Path:
 
 
 class Playback:
-    """録画の再生（cv2 で読み，QTimer で進める）．raw / skeleton / overlay の差し替えと非表示に対応."""
+    """録画の再生（cv2 で読み，QTimer で進める）．raw / skeleton / overlay の差し替えと非表示に対応．
+
+    複数人モードの録画で人物ごとの Box（people.json の bbox / slot）があれば people に読み込む．
+    overlay 表示中は人物ごとの Box を生映像から作り直すため，raw 動画も並行して読む（raw_frame）．
+    """
 
     def __init__(self, on_frame, on_tick):
         self.on_frame = on_frame
@@ -58,6 +63,9 @@ class Playback:
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self._step)
         self.timeline: Timeline | None = None
+        self.people: PeopleTrack | None = None
+        self.raw_cap: cv2.VideoCapture | None = None
+        self.raw_frame: np.ndarray | None = None
         self.size = (16, 9)
 
     @property
@@ -96,6 +104,9 @@ class Playback:
             self.available = {"hidden"}
             self.file = url
         self.timeline = Timeline.load_for_video(url)
+        self.people = PeopleTrack.load_for_video(url)
+        if self.people is not None and parts and "raw" in self.available:
+            self.raw_cap = cv2.VideoCapture(str(variant_path(parts[1], parts[0], "raw")))
         self._open_file(self.file)
         self.index = 0
         self.play()
@@ -146,7 +157,9 @@ class Playback:
             return
         self.index = max(0, min(index, max(0, self.frames - 1)))
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.index)
-        ok, frame = self.cap.read()
+        if self.raw_cap is not None:
+            self.raw_cap.set(cv2.CAP_PROP_POS_FRAMES, self.index)
+        ok, frame = self._read()
         if ok:
             self.on_frame(None if self.variant == "hidden" else frame)
         self.on_tick()
@@ -155,10 +168,22 @@ class Playback:
         self.pause()
         self.seek(self.index + delta)
 
+    def _read(self):
+        """表示中の動画を 1 フレーム読む．overlay 表示で人物ごとの Box があるときは生映像も同じ位置を読む．
+
+        生映像は overlay のときだけ読み進める（他の表示から overlay へ切り替えるときは seek で位置を揃え直す）．
+        """
+        ok, frame = self.cap.read()
+        self.raw_frame = None
+        if self.raw_cap is not None and self.variant == "overlay":
+            ok_raw, raw = self.raw_cap.read()
+            self.raw_frame = raw if ok_raw else None
+        return ok, frame
+
     def _step(self):
         if self.cap is None:
             return
-        ok, frame = self.cap.read()
+        ok, frame = self._read()
         if not ok:
             self.pause()
             return
@@ -173,8 +198,13 @@ class Playback:
         if self.cap is not None:
             self.cap.release()
             self.cap = None
+        if self.raw_cap is not None:
+            self.raw_cap.release()
+            self.raw_cap = None
+        self.raw_frame = None
         self.url = None
         self.timeline = None
+        self.people = None
 
 
 class MainWindow(QMainWindow):
@@ -192,6 +222,8 @@ class MainWindow(QMainWindow):
         self.metric_mode = self.settings.value("metricMode", "upperBody")
         self.draw_options = DrawOptions()
         self.history = M.History()
+        # 複数人モード：人物番号ごとの履歴（毎フレーム全員分を積む．いない人は NaN）
+        self.slot_histories = {s: M.History() for s in range(1, MAX_PEOPLE + 1)}
         self.inference_times: list[float] = []
         self.recording = False
         self.importing = False
@@ -241,14 +273,24 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # 上部バー
-        top = QHBoxLayout(); top.setContentsMargins(12, 8, 12, 6); top.setSpacing(12)
+        # 上部バー：左から 人数（1人 / 複数人），表示の切り替え（2×2），部位とミラー（2 行），状態，カメラ
+        top = QHBoxLayout(); top.setContentsMargins(12, 10, 12, 10); top.setSpacing(12)
         self.style_label = QLabel("表示")
-        self.style_combo = QComboBox()
-        for key, label in STYLES:
-            self.style_combo.addItem(label, key)
-        self.style_combo.setCurrentIndex([k for k, _ in STYLES].index(self.live_style))
-        self.style_combo.currentIndexChanged.connect(self._on_style_changed)
+        # 表示の切り替え：排他のトグルボタンを 2×2 に並べる（再生中は録画に無い種類を無効にする）
+        self.style_group = QButtonGroup(self)
+        self.style_group.setExclusive(True)
+        self.style_buttons: dict[str, QToolButton] = {}
+        style_grid = QGridLayout(); style_grid.setContentsMargins(0, 0, 0, 0); style_grid.setSpacing(4)
+        style_grid.setVerticalSpacing(2)
+        for i, (key, label) in enumerate(STYLES):
+            b = QToolButton(); b.setText(label); b.setCheckable(True)
+            b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            b.setMinimumWidth(64)
+            self.style_group.addButton(b, i)
+            self.style_buttons[key] = b
+            style_grid.addWidget(b, i // 2, i % 2)
+        self.style_buttons[self.live_style].setChecked(True)
+        self.style_group.idClicked.connect(lambda i: self._on_style_changed(STYLES[i][0]))
         self.part_checks = {}
         for key, label in (("face", "顔"), ("pose", "体（pose）"), ("left_hand", "左手"), ("right_hand", "右手")):
             cb = QCheckBox(label); cb.setChecked(True)
@@ -266,20 +308,47 @@ class MainWindow(QMainWindow):
         self.person_combo.setToolTip("1人: Holistic / 複数人: YOLO で人物を検出し人物ごとに Holistic（uv sync --extra multi が必要）")
         self.camera_combo = QComboBox()
         self.camera_combo.currentIndexChanged.connect(self._on_camera_selected)
-        top.addWidget(self.style_label); top.addWidget(self.style_combo)
-        for cb in self.part_checks.values():
-            top.addWidget(cb)
-        top.addWidget(self.mirror_check)
-        top.addStretch(1)
-        top.addWidget(self.status_label)
-        top.addStretch(1)
-        top.addWidget(QLabel("人数")); top.addWidget(self.person_combo)
-        top.addWidget(QLabel("カメラ")); top.addWidget(self.camera_combo)
+        person_box = QVBoxLayout(); person_box.setSpacing(4)
+        person_box.addWidget(QLabel("人数")); person_box.addWidget(self.person_combo)
+        # 部位とミラーは 2 行に並べる（1 行目: 顔，体，ミラー / 2 行目: 左手，右手）
+        part_grid = QGridLayout(); part_grid.setContentsMargins(0, 0, 0, 0)
+        part_grid.setHorizontalSpacing(8); part_grid.setVerticalSpacing(6)
+        for (r, c), key in zip(((0, 0), (0, 1), (1, 0), (1, 1)), ("face", "pose", "left_hand", "right_hand")):
+            part_grid.addWidget(self.part_checks[key], r, c)
+        part_grid.addWidget(self.mirror_check, 0, 2)
+        # ボタン：Record / Play はバーの中央，選んで再生・動画を処理・Reveal・保存先は右端に置く
+        self.btn_record = self._big_button("⏺", "Record", self._toggle_recording, 72)
+        self.btn_playrec = self._big_button("▶", "Play", self._toggle_playback, 72)
+        self.btn_choose = self._big_button("📂", "選んで再生…", self._choose_playback)
+        self.btn_reveal = self._big_button("🗂", "Reveal", self._reveal_output)
+        self.btn_import = self._big_button("⬇", "動画を処理…", self._import_video)
+        self.btn_outdir = self._big_button("⚙", "保存先…", self._choose_output_root)
+        self.btn_record.setShortcut(QKeySequence("Ctrl+R"))
+        self.left_controls = QWidget()
+        lcl = QHBoxLayout(self.left_controls); lcl.setContentsMargins(0, 0, 0, 0); lcl.setSpacing(12)
+        lcl.addLayout(person_box)
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.VLine); lcl.addWidget(sep)
+        style_box = QVBoxLayout(); style_box.setSpacing(4)
+        style_box.addWidget(self.style_label); style_box.addLayout(style_grid)
+        lcl.addLayout(style_box)
+        lcl.addLayout(part_grid)
+        lcl.addStretch(1)
+        self.right_buttons = QWidget()
+        rl = QHBoxLayout(self.right_buttons); rl.setContentsMargins(0, 0, 0, 0); rl.setSpacing(0)
+        rl.addStretch(1)
+        for b in (self.btn_choose, self.btn_import, self.btn_reveal, self.btn_outdir):
+            rl.addWidget(b)
+        # Record / Play を常にバー全体の中央に置くため，左（設定）と右（ボタン群）の領域を同じ幅にする
+        # （広い方の幅に合わせる．幅は _apply_scale で合わせ直す．ボタンを小さくして窓の最小幅を抑えている）
+        top.addWidget(self.left_controls, 1)
+        top.addWidget(self.btn_record); top.addWidget(self.btn_playrec)
+        top.addWidget(self.right_buttons, 1)
         root.addLayout(top)
 
         # 映像
         self.video = VideoView()
         self.video.mirror = self.mirror_check.isChecked()
+        self.video.resized.connect(self._on_video_resized)
 
         # 再生バー（再生中だけ表示）
         self.transport = QWidget()
@@ -300,24 +369,17 @@ class MainWindow(QMainWindow):
         tl.addWidget(self.seek_slider, 1)
         self.transport.setVisible(False)
 
-        # ボタン列
-        buttons = QWidget()
-        bl = QHBoxLayout(buttons); bl.setContentsMargins(8, 8, 8, 4); bl.setSpacing(0)
-        self.btn_record = self._big_button("⏺", "Record", self._toggle_recording)
-        self.btn_playrec = self._big_button("▶", "Play", self._toggle_playback)
-        self.btn_choose = self._big_button("📂", "選んで再生…", self._choose_playback)
-        self.btn_reveal = self._big_button("🗂", "Reveal", self._reveal_output)
-        self.btn_import = self._big_button("⬇", "動画を処理…", self._import_video)
-        self.btn_outdir = self._big_button("⚙", "保存先…", self._choose_output_root)
-        for b in (self.btn_record, self.btn_playrec, self.btn_choose, self.btn_reveal, self.btn_import, self.btn_outdir):
-            bl.addWidget(b)
-        self.btn_record.setShortcut(QKeySequence("Ctrl+R"))
+        # 状態表示とカメラの選択（映像とグラフの間の 1 行）
+        status_row = QWidget()
+        sl = QHBoxLayout(status_row); sl.setContentsMargins(12, 6, 12, 2); sl.setSpacing(8)
+        sl.addWidget(self.status_label); sl.addStretch(1)
+        sl.addWidget(QLabel("カメラ")); sl.addWidget(self.camera_combo)
         self.outdir_label = QLabel()
         self.outdir_label.setStyleSheet("color: gray")
         self.msg_label = QLabel(); self.msg_label.setStyleSheet("color: gray")
         lower_top = QWidget()
         ltl = QVBoxLayout(lower_top); ltl.setContentsMargins(0, 0, 0, 0); ltl.setSpacing(2)
-        ltl.addWidget(self.transport); ltl.addWidget(buttons)
+        ltl.addWidget(self.transport); ltl.addWidget(status_row)
         ltl.addWidget(self.outdir_label); ltl.addWidget(self.msg_label)
         self._update_outdir_label()
 
@@ -331,9 +393,18 @@ class MainWindow(QMainWindow):
         self.mode_combo.setCurrentIndex(list(M.MODES).index(self.metric_mode))
         self.mode_combo.currentIndexChanged.connect(self._on_metric_mode_changed)
         self.mode_desc = QLabel(); self.mode_desc.setStyleSheet("color: gray")
+        # 複数人モードだけ：波形に出す人物（全体映像の枠の番号）を選ぶ
+        self.slot_label = QLabel("人物")
+        self.slot_combo = QComboBox()
+        for slot in range(1, MAX_PEOPLE + 1):
+            self.slot_combo.addItem(f"{slot}人目", slot)
+        self.slot_combo.setToolTip("複数人モード：波形に出す人物（映像の枠の番号）．その人がいないフレームは欠損として扱う")
+        self.slot_combo.currentIndexChanged.connect(self._on_slot_changed)
         self.zoom_label = QLabel(""); self.zoom_label.setStyleSheet("color: gray")
         self.btn_zoom_all = QPushButton("全体"); self.btn_zoom_all.clicked.connect(self._zoom_all); self.btn_zoom_all.setVisible(False)
-        mode_bar.addWidget(self.mode_combo); mode_bar.addWidget(self.mode_desc); mode_bar.addStretch(1)
+        mode_bar.addWidget(self.mode_combo); mode_bar.addSpacing(12)
+        mode_bar.addWidget(self.slot_label); mode_bar.addWidget(self.slot_combo); mode_bar.addSpacing(12)
+        mode_bar.addWidget(self.mode_desc); mode_bar.addStretch(1)
         mode_bar.addWidget(self.zoom_label); mode_bar.addWidget(self.btn_zoom_all)
         gl.addLayout(mode_bar)
         line = QFrame(); line.setFrameShape(QFrame.Shape.HLine); gl.addWidget(line)
@@ -380,6 +451,8 @@ class MainWindow(QMainWindow):
         self.resize(1280, 1000)
         self._apply_metric_mode()
         self._update_chart_checks()
+        self._update_slot_selector()
+        self._on_style_changed(self.live_style)
 
         # メニュー / ショートカット
         view_menu = self.menuBar().addMenu("表示")
@@ -392,14 +465,15 @@ class MainWindow(QMainWindow):
         self.addAction(act2)
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, activated=self._space)
 
-    def _big_button(self, icon: str, label: str, slot) -> QToolButton:
+    def _big_button(self, icon: str, label: str, slot, min_width: int = 64) -> QToolButton:
         b = QToolButton()
         b.setText(f"{icon}\n{label}")
         b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        b.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         b.setAutoRaise(True)
         b.clicked.connect(slot)
-        b.setMinimumHeight(56)
+        b.setMinimumHeight(48)
+        b.setMinimumWidth(min_width)
         return b
 
     # ---------------------------------------------------------------- scale
@@ -423,6 +497,17 @@ class MainWindow(QMainWindow):
         for lab in self.findChildren(QLabel):
             if lab.text() == "グラフ項目":
                 fh = QFont(f); fh.setBold(True); fh.setPointSizeF(base * 1.3); lab.setFont(fh)
+        # 文字の大きさが反映されてから幅を測る
+        QTimer.singleShot(0, self._balance_top_bar)
+
+    def _balance_top_bar(self):
+        """上部バーの左（設定）と右（ボタン群）を同じ幅にして，Record / Play を中央に保つ."""
+        for side in (self.left_controls, self.right_buttons):
+            side.setMinimumWidth(0)
+            side.layout().invalidate()
+        side_w = max(self.left_controls.sizeHint().width(), self.right_buttons.sizeHint().width())
+        for side in (self.left_controls, self.right_buttons):
+            side.setMinimumWidth(side_w)
 
     @staticmethod
     def _bold(f: QFont) -> QFont:
@@ -490,23 +575,31 @@ class MainWindow(QMainWindow):
         self.switching_mode = False
         self.person_mode = mode
         self.settings.setValue("personMode", mode)
+        self.slot_histories = {s: M.History() for s in range(1, MAX_PEOPLE + 1)}
+        self.history_dirty = True
+        self._update_slot_selector()
         self._update_status()
 
-    def _on_result(self, image, frame, metrics, recorded):
+    def _on_result(self, res):
+        """res は pipeline.Processed（ライブと動画の処理中）."""
         self.frame_seen = True
         self.history_dirty = True
         if self.playback.url is None:
-            self.video.set_bgr(image)
+            self.video.set_tiles(res.image, res.tiles)
             if self.live_style == "hidden":
                 self.video.message = "映像は非表示（推論と波形は動作中）"
             elif self.video.message and self.video.message.startswith("映像は非表示"):
                 self.video.message = None
-        self.history.push(metrics, time.monotonic() - self.t0)
+        t = time.monotonic() - self.t0
+        self.history.push(res.metrics, t)
+        if self.person_mode == MODE_MULTI:
+            for slot, h in self.slot_histories.items():
+                h.push(res.slot_metrics.get(slot, {}), t)
         now = time.monotonic()
         self.inference_times.append(now)
         self.inference_times = [t for t in self.inference_times if t > now - 2]
         if self.recording:
-            self.video.badge_tr = f"REC {recorded}"
+            self.video.badge_tr = f"REC {res.recorded}"
         self._update_status()
 
     def _update_status(self):
@@ -520,13 +613,19 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet("")
 
     # ---------------------------------------------------------------- controls
-    def _on_style_changed(self, idx: int):
+    def _set_style_choices(self, keys, current: str):
+        """表示の切り替えボタンのうち keys だけを有効にし，current を選んだ状態にする."""
+        for k, b in self.style_buttons.items():
+            b.setEnabled(k in keys)
+            b.setChecked(k == current)
+
+    def _on_style_changed(self, key: str):
         if self.playback.url is not None:
-            self.playback.set_variant(self.style_combo.itemData(idx))
+            self.playback.set_variant(key)
             self.video.message = "映像は非表示（波形のみ再生中）" if self.playback.variant == "hidden" else None
             self.video.update()
             return
-        self.live_style = self.style_combo.itemData(idx)
+        self.live_style = key
         self.settings.setValue("liveStyle", self.live_style)
         self.wt.worker.pipeline.live_style = self.live_style
         show_parts = self.live_style in ("skeleton", "overlay")
@@ -555,6 +654,32 @@ class MainWindow(QMainWindow):
         self.switching_mode = True
         self._update_status()
         self._set_mode.emit(mode)
+
+    def _on_video_resized(self):
+        """映像の表示域の大きさが変わったら，人物タイルの切り出しの縦横比をマスに合わせ直す."""
+        self.wt.worker.pipeline.tile_aspects = self.video.tile_aspects()
+        if self.playback.url is not None and not self.playback.playing:
+            self.playback.seek(self.playback.index)
+
+    def _on_slot_changed(self, idx: int):
+        if self.playback.url is not None:
+            self._load_playback_timeline()
+        else:
+            self.history_dirty = True
+
+    def _update_slot_selector(self):
+        """人物のセレクタは複数人モード（ライブ）か，人物番号のある録画の再生中だけ出す."""
+        if self.playback.url is not None:
+            on = self.playback.people is not None
+        else:
+            on = self.person_mode == MODE_MULTI
+        self.slot_label.setVisible(on)
+        self.slot_combo.setVisible(on)
+
+    def _live_history(self) -> M.History:
+        if self.person_mode == MODE_MULTI:
+            return self.slot_histories[self.slot_combo.currentData()]
+        return self.history
 
     def _on_metric_mode_changed(self, idx: int):
         self.metric_mode = self.mode_combo.itemData(idx)
@@ -648,19 +773,14 @@ class MainWindow(QMainWindow):
         self.transport.setVisible(True)
         self.btn_zoom_all.setVisible(True)
         self.style_label.setText("再生映像")
-        self.style_combo.blockSignals(True)
-        self.style_combo.clear()
-        for key, label in STYLES:
-            if key in self.playback.available:
-                self.style_combo.addItem(label, key)
-        self.style_combo.setCurrentIndex(max(0, self.style_combo.findData(self.playback.variant)))
-        self.style_combo.blockSignals(False)
+        self._set_style_choices(self.playback.available, self.playback.variant)
         for cb in self.part_checks.values():
             cb.setVisible(False)
         self.mirror_check.setVisible(False)
         self.seek_slider.setRange(0, max(0, self.playback.frames - 1))
         self.video.badge_tl = f"再生中: {url.name}" + ("" if self.playback.timeline else "（波形データなし）")
         self.graph_panel.set_mouse_enabled(True)
+        self._update_slot_selector()
         self._load_playback_timeline()
         self._zoom_all()
         self._refresh_buttons()
@@ -671,13 +791,10 @@ class MainWindow(QMainWindow):
         self.btn_zoom_all.setVisible(False)
         self.zoom_label.setText("")
         self.style_label.setText("表示")
-        self.style_combo.blockSignals(True)
-        self.style_combo.clear()
-        for key, label in STYLES:
-            self.style_combo.addItem(label, key)
-        self.style_combo.setCurrentIndex([k for k, _ in STYLES].index(self.live_style))
-        self.style_combo.blockSignals(False)
-        self._on_style_changed(self.style_combo.currentIndex())
+        self._set_style_choices([k for k, _ in STYLES], self.live_style)
+        self._on_style_changed(self.live_style)
+        self._update_slot_selector()
+        self.history_dirty = True
         self.mirror_check.setVisible(True)
         self.video.badge_tl = None
         self.video.set_bgr(None)
@@ -687,7 +804,21 @@ class MainWindow(QMainWindow):
         self._refresh_buttons()
 
     def _on_playback_frame(self, bgr):
-        self.video.set_bgr(bgr)
+        pb = self.playback
+        tiles = []
+        if bgr is not None and pb.people is not None:
+            # overlay は生映像から切り出して描き直す（生映像が無い録画では overlay 映像をそのまま切り出す）
+            style, bg = pb.variant, bgr
+            if style == "overlay":
+                if pb.raw_frame is not None:
+                    bg = pb.raw_frame
+                else:
+                    style = "raw"
+            people = pb.people.people_at(pb.index)
+            count = 1 + max((q.slot for q in people), default=0)
+            aspect = self.video.tile_aspects().get(count, renderer.TILE_ASPECT)
+            tiles = renderer.person_tiles(people, bg, (bg.shape[1], bg.shape[0]), style, aspect=aspect)
+        self.video.set_tiles(bgr, tiles)
         self.video.message = "映像は非表示（波形のみ再生中）" if bgr is None and self.playback.variant == "hidden" else None
 
     def _on_playback_tick(self):
@@ -705,6 +836,14 @@ class MainWindow(QMainWindow):
 
     def _load_playback_timeline(self):
         t = self.playback.timeline
+        people = self.playback.people
+        if people is not None and len(people):
+            # 人物番号のある録画：選んだ人物の指標（いないフレームは NaN）．時刻は同じ行の timestamp_ms
+            secs = (people.timestamps - people.timestamps[0]) / 1000.0
+            values = people.slot_values.get(self.slot_combo.currentData(), {})
+            for w in self.graph_panel.widgets.values():
+                w.update_series(secs, values, 0, full=True)
+            return
         for w in self.graph_panel.widgets.values():
             if t is None:
                 w.update_series(np.zeros(0), {})
@@ -744,9 +883,10 @@ class MainWindow(QMainWindow):
             return
         now = time.monotonic() - self.t0
         dirty, self.history_dirty = self.history_dirty, False
+        hist = self._live_history()
         for w in self.graph_panel.visible_widgets():
             if dirty:
-                w.update_series(self.history.times, self.history.values, self.history.start_index)
+                w.update_series(hist.times, hist.values, hist.start_index)
             w.set_x_range(now - LIVE_WINDOW, now)
             w.set_now(now)
 
