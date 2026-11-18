@@ -48,10 +48,25 @@ def cmd_doctor(args) -> int:
         import ultralytics, torch
         print(f"ultralytics: {ultralytics.__version__} torch: {torch.__version__} "
               f"(mps={torch.backends.mps.is_available()}, cuda={torch.cuda.is_available()})")
+        if torch.cuda.is_available():
+            print(f"  CUDA {torch.version.cuda}: {torch.cuda.get_device_name(0)}（YOLO はこの GPU を使う）")
+        elif sys.platform != "darwin":
+            print("  CUDA が使えません（" + ("torch が CPU 版です．uv sync --extra multi をやり直してください" if torch.version.cuda is None
+                                        else "NVIDIA ドライバを確認してください（CUDA 13.0 版の torch）") + "）")
     except Exception:
         print("ultralytics: not installed（複数人モードは使えません．uv sync --extra multi）")
-    from .detectors import models_dir
+    from .detectors import models_dir, Holistic
     print("models dir:", models_dir())
+    # Holistic を実際に作って 1 回推論し，使えた演算装置を表示する（GPU が失敗すれば CPU に切り替わる）
+    try:
+        import numpy as np
+        h = Holistic()
+        h.detect(np.zeros((256, 256, 3), np.uint8), 0)
+        print(f"mediapipe delegate: {h.delegate.upper()}"
+              + ("" if sys.platform.startswith("linux") else "（MediaPipe の GPU は Linux のみ対応）"))
+        h.close()
+    except Exception as e:
+        print("mediapipe delegate: error", e)
     import cv2, tempfile, os
     from .recorder import open_writer
     with tempfile.TemporaryDirectory() as d:

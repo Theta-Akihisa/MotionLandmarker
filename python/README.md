@@ -1,6 +1,7 @@
 # MotionLandmarker（Python 単体版）
 
-Swift 版と同じ機能を Python だけで実装したもので，**macOS と Windows** で動きます．
+Swift 版と同じ機能を Python だけで実装したもので，**macOS・Windows・Linux（Ubuntu）** で動きます．
+Windows と Ubuntu では NVIDIA の GPU があれば使います（[GPU の利用](#gpu-の利用)）．
 Web カメラの映像から MediaPipe Holistic Landmarker で上半身のランドマークをリアルタイムに抽出し，
 映像への重ね描き・動作の波形グラフ表示・録画（CSV / JSON / 動画3種）・録画の再生・動画ファイルの処理を行います．
 
@@ -85,8 +86,30 @@ Ultralytics と PyTorch が必要で（約 1 GB），**AGPL-3.0 ライセンス*
 uv sync --extra multi
 ```
 
-YOLO の重み（yolo11n.pt，約 5 MB）は初回に自動でダウンロードされます．GPU は macOS では MPS，Windows では CUDA があれば使います．
+YOLO の重み（yolo11n.pt，約 5 MB）は初回に自動でダウンロードされます．
+Windows と Linux（x86_64）では CUDA 版の PyTorch（数 GB）が入ります（[GPU の利用](#gpu-の利用)）．
 既知の制約（人同士の重なり，中央の人の入れ替わりなど）は上位フォルダの README と同じです．
+
+## GPU の利用
+
+| | Holistic（MediaPipe） | YOLO（PyTorch，複数人モード） |
+|------|------|------|
+| Linux（Ubuntu） | GPU（使えなければ自動で CPU） | CUDA |
+| Windows | CPU（MediaPipe の Python 版は Linux でしか GPU に対応していない） | CUDA |
+| macOS | CPU | MPS（Apple GPU） |
+
+- CUDA は PyTorch の CUDA 13.0 版を使います（`uv sync --extra multi` で Windows と Linux x86_64 に自動で入ります）．
+  CUDA Toolkit のインストールは不要ですが，**NVIDIA ドライバ 580 系以降**が必要です．
+  CUDA 13.0 は GTX 10 系など古い世代（Maxwell / Pascal / Volta）には対応していません
+- CUDA では YOLO を半精度（FP16）で推論します
+- Holistic の GPU は作成時または最初の推論で失敗すると，その旨を表示して CPU に切り替えます（以後はそのセッション中 CPU）．
+  環境変数 `ML_MP_DELEGATE` で `auto`（既定．Linux だけ GPU）/ `gpu` / `cpu` を指定できます
+- 実際に使っている演算装置は，画面上部の状態表示（例：`MediaPipe 30.0 fps（MediaPipe GPU · YOLO CUDA）`）と
+  `uv run motionlandmarker doctor`（GPU 名，CUDA の版，Holistic が GPU で動いたか）で確認できます
+- Holistic を GPU で動かすには OpenGL ES / EGL が必要です．Ubuntu では NVIDIA ドライバに加えて
+  `sudo apt install libegl1 libgles2` を入れておいてください（GUI の Qt には `libxcb-cursor0` も必要です）
+- GPU での動作（CUDA，Holistic の GPU）は開発環境（macOS）では確認できておらず，未検証です．
+  まず `doctor` の出力を確認してください
 
 ## Windows での注意
 

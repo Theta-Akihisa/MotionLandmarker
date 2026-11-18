@@ -609,7 +609,8 @@ class MainWindow(QMainWindow):
             self.status_label.setText("モードを切り替え中（モデルの読み込み）…")
         else:
             fps = len(self.inference_times) / 2.0
-            self.status_label.setText(f"MediaPipe {fps:.1f} fps")
+            accel = self.wt.worker.pipeline.detector.accel
+            self.status_label.setText(f"MediaPipe {fps:.1f} fps" + (f"（{accel}）" if accel else ""))
         self.status_label.setStyleSheet("")
 
     # ---------------------------------------------------------------- controls

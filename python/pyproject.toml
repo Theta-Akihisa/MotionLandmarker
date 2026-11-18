@@ -1,7 +1,7 @@
 [project]
 name = "motionlandmarker"
 version = "0.1.0"
-description = "MediaPipe による上半身ランドマークのリアルタイム可視化・録画（Python 単体版，macOS / Windows）"
+description = "MediaPipe による上半身ランドマークのリアルタイム可視化・録画（Python 単体版，macOS / Windows / Linux）"
 # mediapipe は Swift 版のサイドカーと同じ 0.10 系に固定する（Mac と Windows で数値を揃えるため）．
 # 0.10 系の wheel は Python 3.12 まで．
 requires-python = ">=3.12,<3.13"
@@ -24,8 +24,20 @@ override-dependencies = [
 ]
 
 [project.optional-dependencies]
-# 複数人モード（YOLO）．Ultralytics は AGPL-3.0，PyTorch 込みで約 1 GB
-multi = ["ultralytics", "lap"]
+# 複数人モード（YOLO）．Ultralytics は AGPL-3.0，PyTorch 込みで約 1 GB（CUDA 版は数 GB）．
+# torch / torchvision は下の sources で Windows と Linux（x86_64）に CUDA 版を入れるため直接指定する
+multi = ["ultralytics", "lap", "torch", "torchvision"]
+
+# Windows と Linux（x86_64）は PyTorch の CUDA 13.0 版を使う（PyPI の Windows 版は CPU 専用のため）．
+# macOS は PyPI の版（MPS 対応）のまま
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')" }]
+torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32' or (sys_platform == 'linux' and platform_machine == 'x86_64')" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
 
 [project.scripts]
 motionlandmarker = "motionlandmarker.__main__:main"

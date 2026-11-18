@@ -2,6 +2,11 @@
 
 1 人モードは Holistic Landmarker．複数人モードは YOLO（Ultralytics，任意依存）で人物の枠を
 検出・追跡し，人物ごとに切り出して Holistic Landmarker を適用する．
+
+GPU の使い方:
+- Holistic（MediaPipe）の GPU は Linux（Ubuntu）だけが対応．Linux では GPU で作り，作成や推論に失敗したら
+  CPU に切り替える（以後は CPU のまま）．Windows / macOS は CPU．環境変数 ML_MP_DELEGATE=auto|gpu|cpu で指定できる．
+- YOLO（PyTorch）は CUDA（Windows / Linux），MPS（macOS），CPU の順に使えるものを使う．CUDA では半精度で推論する．
 """
 from __future__ import annotations
 
@@ -63,12 +68,66 @@ def _mp():
     return mp, BaseOptions, vision
 
 
-def _create_holistic():
+_mp_gpu_failed = False      # Holistic の GPU が一度でも失敗したら以後は CPU で作る
+
+
+def holistic_delegate() -> str:
+    """Holistic に使う演算装置（"gpu" | "cpu"）．MediaPipe の Python 版で GPU が使えるのは Linux だけ."""
+    want = os.environ.get("ML_MP_DELEGATE", "auto").lower()
+    if want == "cpu" or _mp_gpu_failed:
+        return "cpu"
+    if want == "gpu":
+        return "gpu"
+    return "gpu" if sys.platform.startswith("linux") else "cpu"
+
+
+def _gpu_failed(e: Exception):
+    global _mp_gpu_failed
+    if not _mp_gpu_failed:
+        print(f"MediaPipe の GPU が使えないため CPU に切り替えます: {e}", file=sys.stderr, flush=True)
+    _mp_gpu_failed = True
+
+
+def _create_holistic(delegate: str):
     mp, BaseOptions, vision = _mp()
+    d = BaseOptions.Delegate.GPU if delegate == "gpu" else BaseOptions.Delegate.CPU
     return vision.HolisticLandmarker.create_from_options(vision.HolisticLandmarkerOptions(
-        base_options=BaseOptions(model_asset_path=model_path("holistic_landmarker.task")),
+        base_options=BaseOptions(model_asset_path=model_path("holistic_landmarker.task"), delegate=d),
         running_mode=vision.RunningMode.VIDEO,
     ))
+
+
+class Holistic:
+    """Holistic Landmarker（VIDEO モード）．GPU で作成・推論に失敗したら CPU で作り直して続ける."""
+
+    def __init__(self):
+        self.delegate = holistic_delegate()
+        try:
+            self.lm = _create_holistic(self.delegate)
+        except Exception as e:
+            if self.delegate != "gpu":
+                raise
+            _gpu_failed(e)
+            self.delegate = "cpu"
+            self.lm = _create_holistic("cpu")
+
+    def detect(self, rgb: np.ndarray, ts: int):
+        mp, _, _ = _mp()
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        try:
+            return self.lm.detect_for_video(image, ts)
+        except Exception as e:
+            if self.delegate != "gpu":
+                raise
+            # 作り直した Landmarker はタイムスタンプの履歴を持たないので，同じ ts でやり直せる
+            _gpu_failed(e)
+            self.close()
+            self.delegate = "cpu"
+            self.lm = _create_holistic("cpu")
+            return self.lm.detect_for_video(image, ts)
+
+    def close(self):
+        self.lm.close()
 
 
 def _to_person(r, transform=None) -> Person:
@@ -90,12 +149,14 @@ class SingleDetector:
     """Holistic Landmarker（1 人）."""
 
     def __init__(self):
-        self.lm = _create_holistic()
+        self.lm = Holistic()
+
+    @property
+    def accel(self) -> str:
+        return f"MediaPipe {self.lm.delegate.upper()}"
 
     def detect(self, rgb: np.ndarray, ts: int) -> tuple[Person, list[Person]]:
-        mp, _, _ = _mp()
-        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        return _to_person(self.lm.detect_for_video(image, ts)), []
+        return _to_person(self.lm.detect(rgb, ts)), []
 
     def close(self):
         self.lm.close()
@@ -164,10 +225,11 @@ class MultiDetector:
         except ImportError as e:
             raise RuntimeError("複数人モードには ultralytics が必要です（uv sync --extra multi）") from e
         os.environ.setdefault("YOLO_VERBOSE", "False")
-        if torch.backends.mps.is_available():
-            self.device = "mps"
-        elif torch.cuda.is_available():
+        if torch.cuda.is_available():
             self.device = "cuda"
+            torch.backends.cudnn.benchmark = True    # 入力サイズが一定なので最速の畳み込みを選ばせる
+        elif torch.backends.mps.is_available():
+            self.device = "mps"
         else:
             self.device = "cpu"
         self.yolo = YOLO(str(models_dir() / "yolo11n.pt"))  # 無ければ ultralytics が同じ場所へダウンロードする
@@ -175,10 +237,15 @@ class MultiDetector:
         self.assigner = SlotAssigner()
         self.frame_no = 0
 
+    @property
+    def accel(self) -> str:
+        delegates = {h.delegate for h, _ in self.holistics.values()} or {holistic_delegate()}
+        return f"MediaPipe {'/'.join(sorted(d.upper() for d in delegates))} · YOLO {self.device.upper()}"
+
     def _holistic(self, tid: int):
         entry = self.holistics.get(tid)
         if entry is None:
-            entry = [_create_holistic(), self.frame_no]
+            entry = [Holistic(), self.frame_no]
             self.holistics[tid] = entry
         entry[1] = self.frame_no
         return entry[0]
@@ -188,12 +255,12 @@ class MultiDetector:
             self.holistics.pop(tid)[0].close()
 
     def detect(self, rgb: np.ndarray, ts: int) -> tuple[Person, list[Person]]:
-        mp, _, _ = _mp()
         self.frame_no += 1
         h, w = rgb.shape[:2]
         # 検出数は信頼度の高い順に最大 MAX_PEOPLE 人まで
         res = self.yolo.track(rgb[:, :, ::-1], persist=True, classes=[0], conf=self.MIN_CONF,
-                              device=self.device, verbose=False, imgsz=640, max_det=MAX_PEOPLE)[0]
+                              device=self.device, half=self.device == "cuda", verbose=False, imgsz=640,
+                              max_det=MAX_PEOPLE)[0]
         people: list[tuple[float, Person, int]] = []
         if res.boxes is not None and len(res.boxes) > 0:
             boxes = res.boxes.xyxy.cpu().numpy()
@@ -214,8 +281,7 @@ class MultiDetector:
                 rw, rh = max(1, int(round(cw * scale))), max(1, int(round(ch * scale)))
                 canvas = np.zeros((self.CANVAS, self.CANVAS, 3), np.uint8)
                 canvas[:rh, :rw] = cv2.resize(crop, (rw, rh), interpolation=cv2.INTER_AREA)
-                r = self._holistic(int(tid)).detect_for_video(
-                    mp.Image(image_format=mp.ImageFormat.SRGB, data=canvas), ts)
+                r = self._holistic(int(tid)).detect(canvas, ts)
                 if not r.pose_landmarks:
                     continue
                 kx, ky = self.CANVAS / scale / w, self.CANVAS / scale / h
@@ -265,6 +331,11 @@ class Detector:
     def _ensure(self):
         if self._impl is None:
             self._impl = MultiDetector() if self.mode == MODE_MULTI else SingleDetector()
+
+    @property
+    def accel(self) -> str:
+        """使っている演算装置の表示（例: "MediaPipe GPU · YOLO CUDA"）．まだ作っていなければ空."""
+        return self._impl.accel if self._impl is not None else ""
 
     def set_mode(self, mode: int):
         if mode != self.mode:
