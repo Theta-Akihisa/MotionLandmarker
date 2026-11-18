@@ -273,11 +273,12 @@ struct ContentView: View {
                     if state.playbackURL != nil {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("再生映像").foregroundStyle(.secondary)
-                            // 録画に無い種類は押せないようにする（2×2 の並びは保つ）
+                            // 録画に無い種類は押せないようにする（横 1 列の並びは保つ）
                             ChoiceGrid(options: AppState.PlaybackVariant.allCases.map { v in
                                            (v, v.label, state.availableVariants.contains(v))
                                        },
-                                       selection: $state.playbackVariant)
+                                       selection: $state.playbackVariant,
+                                       columns: AppState.PlaybackVariant.allCases.count)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 4) {
@@ -313,7 +314,7 @@ struct ContentView: View {
                         icon: state.isRecording ? "stop.circle.fill" : "record.circle",
                         label: state.isRecording ? "Stop" : "Record",
                         tint: state.isRecording ? .red : (state.isReady ? .primary : .secondary),
-                        minWidth: 72
+                        minWidth: 88, large: true
                     ) { state.toggleRecording() }
                     .disabled(!state.isReady || state.isImporting)
                     .help(state.playbackURL != nil ? "録画を始めると再生は止まります" : "")
@@ -323,7 +324,7 @@ struct ContentView: View {
                         icon: state.playbackURL != nil ? "video.circle" : "play.circle",
                         label: state.playbackURL != nil ? "Live" : "Play",
                         tint: (state.lastOverlayURL != nil && !state.isRecording) ? .primary : .secondary,
-                        minWidth: 72
+                        minWidth: 88, large: true
                     ) { state.togglePlayback() }
                     .disabled(state.lastOverlayURL == nil || state.isRecording || state.isImporting)
                     .help("最新の録画を再生 / カメラ映像に戻る")
@@ -697,19 +698,21 @@ private struct CameraControlButton: View {
     let icon: String
     let label: String
     let tint: Color
-    /// 最小幅（pt．文字の倍率を掛ける）。Record / Play は 72，右端のボタンは 64
+    /// 最小幅（pt．文字の倍率を掛ける）。Record / Play は 88，右端のボタンは 64
     var minWidth: CGFloat = 64
+    /// Record / Play 用の大きめの表示（アイコンと文字を大きくし，高さも増やす）
+    var large = false
     let action: () -> Void
     @Environment(\.uiScale) private var uiScale
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 2) {
-                Image(systemName: icon).font(.system(size: 18 * uiScale)).foregroundStyle(tint)
-                Text(label).font(.callout).foregroundStyle(tint).lineLimit(1).fixedSize()
+                Image(systemName: icon).font(.system(size: (large ? 26 : 18) * uiScale)).foregroundStyle(tint)
+                Text(label).font(large ? .body.weight(.medium) : .callout).foregroundStyle(tint).lineLimit(1).fixedSize()
             }
             .padding(.horizontal, 4)
-            .frame(minWidth: minWidth * uiScale, minHeight: 48 * uiScale)
+            .frame(minWidth: minWidth * uiScale, minHeight: (large ? 60 : 48) * uiScale)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
