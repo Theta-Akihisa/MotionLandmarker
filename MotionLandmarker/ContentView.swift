@@ -18,6 +18,8 @@ struct ContentView: View {
     @State private var dragStartHeight: Double?
     private let videoHeightRange: ClosedRange<Double> = 160...1080
     private var videoHeight: Double { draggingHeight ?? savedVideoHeight }
+    /// 映像エリアの大きさが変わったときに人物タイルの縦横比を合わせ直す処理（変化が止まるまで待つ）
+    @State private var tileAspectTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -152,7 +154,7 @@ struct ContentView: View {
             if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { g in
                     if columnDragStart == nil { columnDragStart = savedColumnWidth }
                     let w = (columnDragStart ?? savedColumnWidth) + g.translation.width
@@ -224,7 +226,7 @@ struct ContentView: View {
             if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { g in
                     if dragStartHeight == nil { dragStartHeight = savedVideoHeight }
                     let h = (dragStartHeight ?? savedVideoHeight) + g.translation.height
@@ -409,10 +411,19 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // 映像エリアの大きさから人物タイルのマスの縦横比を求め，切り出しに使う（大きさが変わるたびに合わせ直す）
+            // 仕切りのドラッグや窓の拡大縮小の最中は毎フレーム大きさが変わるので，変化が止まってから 1 回だけ合わせ直す
+            // （その都度切り出しをやり直すと，ドラッグがカクつく）
             .background(GeometryReader { geo in
                 Color.clear
                     .onAppear { state.tileAspects = PersonTiles.cellAspects(for: geo.size) }
-                    .onChange(of: geo.size) { _, size in state.tileAspects = PersonTiles.cellAspects(for: size) }
+                    .onChange(of: geo.size) { _, size in
+                        tileAspectTask?.cancel()
+                        tileAspectTask = Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(150))
+                            guard !Task.isCancelled else { return }
+                            state.tileAspects = PersonTiles.cellAspects(for: size)
+                        }
+                    }
             })
             .background(state.displayImage == nil || (state.playbackURL != nil && state.playbackVariant == .hidden)
                         || (state.playbackURL == nil && state.liveStyle == .hidden)

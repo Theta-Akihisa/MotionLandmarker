@@ -348,7 +348,10 @@ class MainWindow(QMainWindow):
         # 映像
         self.video = VideoView()
         self.video.mirror = self.mirror_check.isChecked()
-        self.video.resized.connect(self._on_video_resized)
+        # 仕切りのドラッグや窓の拡大縮小の最中は大きさが毎回変わるので，変化が止まってから 1 回だけ合わせ直す
+        self.video_resize_timer = QTimer(self); self.video_resize_timer.setSingleShot(True); self.video_resize_timer.setInterval(150)
+        self.video_resize_timer.timeout.connect(self._on_video_resized)
+        self.video.resized.connect(self.video_resize_timer.start)
 
         # 再生バー（再生中だけ表示）
         self.transport = QWidget()
