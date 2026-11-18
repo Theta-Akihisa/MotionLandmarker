@@ -26,12 +26,22 @@ struct ContentView: View {
             if state.playbackURL != nil {
                 transportBar
             }
-            controlButtons
+            statusRow
             resizeHandle
             graphSection
                 .frame(minHeight: 200)
         }
-        .frame(minWidth: 900, minHeight: 600)
+        // 上部バーの左右を同じ幅にして Record / Play を中央に置くので，窓の最小幅はその合計より狭くしない
+        .frame(minWidth: max(900, barMinWidth), minHeight: 600)
+    }
+
+    /// 上部バーの左（設定）・中央（Record / Play）・右（ボタン群）の幅（文字の倍率や表示の切り替えで変わる）
+    @State private var barWidths = BarWidths()
+    private let barSpacing: CGFloat = 12
+    private let barPadding: CGFloat = 12
+    /// 上部バーが中央揃えを保てる最小幅（左右は広い方の幅にそろえる）
+    private var barMinWidth: CGFloat {
+        2 * max(barWidths.left, barWidths.right) + barWidths.center + 2 * barSpacing + 2 * barPadding
     }
 
     /// 再生バー：再生 / 一時停止，コマ送り，シークバー，時刻。映像を非表示にしていても操作できる
@@ -236,63 +246,122 @@ struct ContentView: View {
     // MARK: - カメラ映像＋ランドマーク（アスペクト比を保って可変サイズ）
     private var cameraSection: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 16) {
-                if state.playbackURL != nil {
-                    Text("再生映像").foregroundStyle(.secondary)
-                    Picker("再生映像", selection: $state.playbackVariant) {
-                        ForEach(AppState.PlaybackVariant.allCases.filter { state.availableVariants.contains($0) }) { v in
-                            Text(v.label).tag(v)
+            // 表示設定バー：左から 人数モード｜表示の切り替え（2×2）｜描く部位とミラー（2 行），
+            // 中央に Record / Play，右端にファイル操作のボタン。
+            // Record / Play を常にバー全体の中央に置くため，左右の領域を同じ幅（広い方）にする（BarLayout）
+            BarLayout(spacing: barSpacing) {
+                HStack(alignment: .center, spacing: barSpacing) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("人数").foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Picker("人数", selection: $state.personMode) {
+                                ForEach(AppState.PersonMode.allCases) { m in Text(m.label).tag(m) }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(width: 130 * uiScale)
+                            .disabled(state.isRecording || state.isImporting || state.isSwitchingPersonMode)
+                            .help("1人: Holistic（1人専用）/ 複数人: 人物ごとに切り出して Holistic を適用し最大5人．映像は全体＋1人ずつのタイル，グラフは選んだ人．CSV は画面中央の人")
+                            // 幅を変えないよう常に置いておき，切り替え中だけ見せる（バーの幅＝窓の最小幅が揺れないように）
+                            ProgressView().controlSize(.small)
+                                .opacity(state.isSwitchingPersonMode ? 1 : 0)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 360)
-                } else {
-                    Text("表示").foregroundStyle(.secondary)
-                    Picker("表示", selection: $state.liveStyle) {
-                        Text("生映像").tag(LiveStyle.raw)
-                        Text("skeleton").tag(LiveStyle.skeleton)
-                        Text("overlay").tag(LiveStyle.overlay)
-                        Text("非表示").tag(LiveStyle.hidden)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 360)
-                    if state.liveStyle.showsLandmarks {
-                        Toggle("顔", isOn: $state.drawOptions.face)
-                        Toggle("体（pose）", isOn: $state.drawOptions.pose)
-                        Toggle("左手", isOn: $state.drawOptions.leftHand)
-                        Toggle("右手", isOn: $state.drawOptions.rightHand)
-                    }
-                    Toggle("ミラー", isOn: $mirrorLive)
-                        .help("表示を左右反転する（鏡のように見せる）．録画や CSV の座標は変わらない")
-                }
-                Spacer()
-                sidecarStatus
-                Spacer()
-                Picker("人数", selection: $state.personMode) {
-                    ForEach(AppState.PersonMode.allCases) { m in Text(m.label).tag(m) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 150)
-                .disabled(state.isRecording || state.isImporting || state.isSwitchingPersonMode)
-                .help("1人: Holistic（1人専用）/ 複数人: Pose・Hand・Face を組み合わせて最大4人．グラフと CSV は画面中央の人")
-                if state.isSwitchingPersonMode {
-                    ProgressView().controlSize(.small)
-                }
-                @Bindable var camera = state.camera
-                Picker("カメラ", selection: $camera.selectedDeviceID) {
-                    ForEach(state.camera.devices, id: \.id) { d in
-                        Text(d.name).tag(d.id)
+                    Divider().frame(height: 44 * uiScale)
+                    if state.playbackURL != nil {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("再生映像").foregroundStyle(.secondary)
+                            // 録画に無い種類は押せないようにする（2×2 の並びは保つ）
+                            ChoiceGrid(options: AppState.PlaybackVariant.allCases.map { v in
+                                           (v, v.label, state.availableVariants.contains(v))
+                                       },
+                                       selection: $state.playbackVariant)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("表示").foregroundStyle(.secondary)
+                            ChoiceGrid(options: [(LiveStyle.raw, "生映像", true), (.skeleton, "skeleton", true),
+                                                 (.overlay, "overlay", true), (.hidden, "非表示", true)],
+                                       selection: $state.liveStyle)
+                        }
+                        // 部位とミラー（1 行目: 顔・体・ミラー / 2 行目: 左手・右手）
+                        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+                            GridRow {
+                                if state.liveStyle.showsLandmarks {
+                                    Toggle("顔", isOn: $state.drawOptions.face)
+                                    Toggle("体（pose）", isOn: $state.drawOptions.pose)
+                                }
+                                Toggle("ミラー", isOn: $mirrorLive)
+                                    .help("表示を左右反転する（鏡のように見せる）．録画や CSV の座標は変わらない")
+                            }
+                            if state.liveStyle.showsLandmarks {
+                                GridRow {
+                                    Toggle("左手", isOn: $state.drawOptions.leftHand)
+                                    Toggle("右手", isOn: $state.drawOptions.rightHand)
+                                }
+                            }
+                        }
                     }
                 }
-                .frame(maxWidth: 320)
-                .disabled(state.camera.devices.isEmpty)
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidths.left = $0 }
+
+                HStack(spacing: 4) {
+                    CameraControlButton(
+                        icon: state.isRecording ? "stop.circle.fill" : "record.circle",
+                        label: state.isRecording ? "Stop" : "Record",
+                        tint: state.isRecording ? .red : (state.isReady ? .primary : .secondary),
+                        minWidth: 72
+                    ) { state.toggleRecording() }
+                    .disabled(!state.isReady || state.isImporting)
+                    .help(state.playbackURL != nil ? "録画を始めると再生は止まります" : "")
+                    .keyboardShortcut("r", modifiers: .command)
+
+                    CameraControlButton(
+                        icon: state.playbackURL != nil ? "video.circle" : "play.circle",
+                        label: state.playbackURL != nil ? "Live" : "Play",
+                        tint: (state.lastOverlayURL != nil && !state.isRecording) ? .primary : .secondary,
+                        minWidth: 72
+                    ) { state.togglePlayback() }
+                    .disabled(state.lastOverlayURL == nil || state.isRecording || state.isImporting)
+                    .help("最新の録画を再生 / カメラ映像に戻る")
+                }
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidths.center = $0 }
+
+                HStack(spacing: 0) {
+                    CameraControlButton(
+                        icon: "folder.badge.plus", label: "選んで再生…",
+                        tint: state.isRecording ? .secondary : .primary
+                    ) { state.openRecordingForPlayback() }
+                    .disabled(state.isRecording || state.isImporting)
+                    .help("過去の録画を選んで再生")
+
+                    CameraControlButton(
+                        icon: state.isImporting ? "xmark.circle" : "square.and.arrow.down",
+                        label: state.isImporting ? "中止" : "動画を処理…",
+                        tint: state.isImporting ? .red : ((state.isReady && !state.isRecording) ? .primary : .secondary)
+                    ) { state.isImporting ? state.cancelImport() : state.importVideo() }
+                    .disabled(!state.isReady || state.isRecording)
+                    .help("動画ファイルを読み込んでランドマークを抽出し，CSV / JSON / 動画3種を生成して再生する")
+
+                    CameraControlButton(icon: "folder", label: "Reveal", tint: .primary) { state.revealOutput() }
+
+                    CameraControlButton(icon: "folder.badge.gearshape", label: "保存先…",
+                                        tint: state.isRecording ? .secondary : .primary) { state.chooseOutputRoot() }
+                    .disabled(state.isRecording)
+                    .contextMenu {
+                        Button("既定の保存先に戻す") { state.resetOutputRoot() }
+                            .disabled(state.isDefaultOutputRoot || state.isRecording)
+                    }
+                }
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { barWidths.right = $0 }
             }
             .toggleStyle(.checkbox)
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+            .padding(.horizontal, barPadding)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
 
             ZStack {
                 if state.playbackURL != nil, state.playbackVariant == .hidden {
@@ -300,6 +369,10 @@ struct ContentView: View {
                     Text("映像は非表示（波形のみ再生中）").foregroundStyle(.secondary)
                 } else if state.playbackURL == nil, state.liveStyle == .hidden {
                     Text("映像は非表示（推論と波形は動作中）").foregroundStyle(.secondary)
+                } else if let tiles = state.tileSource {
+                    // 複数人モード：全体映像＋人物ごとのタイル（ライブ・人物番号付きの録画の再生）
+                    PeopleTileGrid(frame: tiles.frame, boxes: tiles.boxes, tiles: tiles.tiles,
+                                   mirror: state.playbackURL == nil && mirrorLive)
                 } else if state.playbackURL != nil {
                     // 録画の再生（カメラ映像と同じ領域に表示）
                     PlayerView(player: state.player)
@@ -335,6 +408,12 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 映像エリアの大きさから人物タイルのマスの縦横比を求め，切り出しに使う（大きさが変わるたびに合わせ直す）
+            .background(GeometryReader { geo in
+                Color.clear
+                    .onAppear { state.tileAspects = PersonTiles.cellAspects(for: geo.size) }
+                    .onChange(of: geo.size) { _, size in state.tileAspects = PersonTiles.cellAspects(for: size) }
+            })
             .background(state.displayImage == nil || (state.playbackURL != nil && state.playbackVariant == .hidden)
                         || (state.playbackURL == nil && state.liveStyle == .hidden)
                         ? Color(cgColor: SkeletonRenderer.sketchBackground) : .clear)
@@ -407,68 +486,39 @@ struct ContentView: View {
         .font(.callout)
     }
 
-    // MARK: - ボタン列
-    private var controlButtons: some View {
+    // MARK: - 映像とグラフの間の行（推論の状態・保存先・カメラ選択・メッセージ）
+    private var statusRow: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 0) {
-                CameraControlButton(
-                    icon: state.isRecording ? "stop.circle.fill" : "record.circle",
-                    label: state.isRecording ? "Stop" : "Record",
-                    tint: state.isRecording ? .red : (state.isReady ? .primary : .secondary)
-                ) { state.toggleRecording() }
-                .disabled(!state.isReady || state.isImporting)
-                .help(state.playbackURL != nil ? "録画を始めると再生は止まります" : "")
-                .keyboardShortcut("r", modifiers: .command)
-
-                CameraControlButton(
-                    icon: state.playbackURL != nil ? "video.circle" : "play.circle",
-                    label: state.playbackURL != nil ? "Live" : "Play",
-                    tint: (state.lastOverlayURL != nil && !state.isRecording) ? .primary : .secondary
-                ) { state.togglePlayback() }
-                .disabled(state.lastOverlayURL == nil || state.isRecording || state.isImporting)
-                .help("最新の録画を再生 / カメラ映像に戻る")
-
-                CameraControlButton(
-                    icon: "folder.badge.plus", label: "選んで再生…",
-                    tint: state.isRecording ? .secondary : .primary
-                ) { state.openRecordingForPlayback() }
-                .disabled(state.isRecording || state.isImporting)
-                .help("過去の録画を選んで再生")
-
-                CameraControlButton(
-                    icon: state.isImporting ? "xmark.circle" : "square.and.arrow.down",
-                    label: state.isImporting ? "中止" : "動画を処理…",
-                    tint: state.isImporting ? .red : ((state.isReady && !state.isRecording) ? .primary : .secondary)
-                ) { state.isImporting ? state.cancelImport() : state.importVideo() }
-                .disabled(!state.isReady || state.isRecording)
-                .help("動画ファイルを読み込んでランドマークを抽出し，CSV / JSON / 動画3種を生成して再生する")
-
-                CameraControlButton(icon: "folder", label: "Reveal", tint: .primary) { state.revealOutput() }
-
-                CameraControlButton(icon: "folder.badge.gearshape", label: "保存先…",
-                                    tint: state.isRecording ? .secondary : .primary) { state.chooseOutputRoot() }
-                .disabled(state.isRecording)
-                .contextMenu {
-                    Button("既定の保存先に戻す") { state.resetOutputRoot() }
-                        .disabled(state.isDefaultOutputRoot || state.isRecording)
+            HStack(spacing: 16) {
+                sidecarStatus
+                Spacer()
+                HStack(spacing: 6) {
+                    Text("保存先:").foregroundStyle(.secondary)
+                    Text(state.outputRoot.path).lineLimit(1).truncationMode(.middle)
+                        .help(state.outputRoot.path)
+                    if !state.isDefaultOutputRoot {
+                        Button("既定に戻す") { state.resetOutputRoot() }
+                            .buttonStyle(.link).disabled(state.isRecording)
+                    }
                 }
-            }
-            HStack(spacing: 6) {
-                Text("保存先:").foregroundStyle(.secondary)
-                Text(state.outputRoot.path).lineLimit(1).truncationMode(.middle)
-                    .help(state.outputRoot.path)
-                if !state.isDefaultOutputRoot {
-                    Button("既定に戻す") { state.resetOutputRoot() }
-                        .buttonStyle(.link).disabled(state.isRecording)
+                .font(.callout)
+                Spacer()
+                @Bindable var camera = state.camera
+                Picker("カメラ", selection: $camera.selectedDeviceID) {
+                    ForEach(state.camera.devices, id: \.id) { d in
+                        Text(d.name).tag(d.id)
+                    }
                 }
+                .frame(maxWidth: 320)
+                .disabled(state.camera.devices.isEmpty)
             }
-            .font(.callout)
+            .padding(.horizontal, 12)
             if let msg = state.statusMessage {
                 Text(msg).font(.callout).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
     }
@@ -484,6 +534,16 @@ struct ContentView: View {
                 .labelsHidden()
                 .frame(width: 260)
                 .font(.title3)
+                if !state.personChoices.isEmpty {
+                    // 複数人モード：グラフに出す人物（映像の枠・タイルの番号と同じ）
+                    Picker("人物", selection: $state.selectedPerson) {
+                        ForEach(state.personChoices, id: \.self) { n in Text("\(n)人目").tag(n) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: CGFloat(state.personChoices.count) * 64 * uiScale)
+                    .help("グラフに出す人物（映像の枠・タイルの番号と同じ）．その人が写っていないフレームは欠損")
+                }
                 Text(state.metricMode == .upperBody
                      ? "頭・体の向きと手首の位置・速度"
                      : "肘から手までの動き（前腕の角度・手の向き・手の開き・手首の速度）")
@@ -522,7 +582,8 @@ struct ContentView: View {
                 ScrollView {
                     // 再生中は録画全体（ズーム中はその範囲）を横軸に出し，赤い線がシークバーと同じ位置を動く。
                     // それ以外はライブの波形
-                    let timeline = state.playbackURL != nil ? state.playbackTimeline : nil
+                    // 人物番号付きの録画では選んだ人物の時系列（AppState.graphTimeline）
+                    let timeline = state.playbackURL != nil ? state.graphTimeline : nil
                     let zoomed = (timeline != nil && zoomRange != nil)
                         ? timeline!.range(fromSeconds: visibleRange.lowerBound, toSeconds: visibleRange.upperBound) : nil
                     let times = zoomed?.times ?? (timeline != nil ? state.playbackAllTimes : state.history.times)
@@ -625,19 +686,173 @@ private struct CameraControlButton: View {
     let icon: String
     let label: String
     let tint: Color
+    /// 最小幅（pt．文字の倍率を掛ける）。Record / Play は 72，右端のボタンは 64
+    var minWidth: CGFloat = 64
     let action: () -> Void
     @Environment(\.uiScale) private var uiScale
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 27 * uiScale)).foregroundStyle(tint)
-                Text(label).font(.title3).foregroundStyle(tint)
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 18 * uiScale)).foregroundStyle(tint)
+                Text(label).font(.callout).foregroundStyle(tint).lineLimit(1).fixedSize()
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 4)
+            .frame(minWidth: minWidth * uiScale, minHeight: 48 * uiScale)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 選択肢を `columns` 列のボタンの格子に並べる（セグメントは 1 行にしか並ばないため）。
+/// `enabled` が false の選択肢は押せない（並びは保つ）
+private struct ChoiceGrid<Value: Hashable>: View {
+    let options: [(value: Value, label: String, enabled: Bool)]
+    @Binding var selection: Value
+    var columns = 2
+    @Environment(\.uiScale) private var uiScale
+
+    var body: some View {
+        Grid(horizontalSpacing: 4, verticalSpacing: 2) {
+            ForEach(Array(stride(from: 0, to: options.count, by: columns)), id: \.self) { start in
+                GridRow {
+                    ForEach(start..<min(start + columns, options.count), id: \.self) { i in
+                        let o = options[i]
+                        Toggle(isOn: Binding(get: { selection == o.value },
+                                             set: { if $0 { selection = o.value } })) {
+                            Text(o.label).frame(minWidth: 52 * uiScale)   // ボタンの縁を含めて 64pt 程度
+                        }
+                        .toggleStyle(.button)
+                        .disabled(!o.enabled)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct BarWidths: Equatable {
+    var left: CGFloat = 0
+    var center: CGFloat = 0
+    var right: CGFloat = 0
+}
+
+/// 3 つの要素を左・中央・右に置く（表示設定バー用）。
+/// 左右の領域を同じ幅（広い方の幅）とみなし，その間に中央の要素を置くので，中央の要素は常にバー全体の中央に来る。
+/// 左の中身は左寄せ，右の中身は右寄せ。幅は毎回測り直すので，文字の倍率を変えても中央に揃う
+private struct BarLayout: Layout {
+    var spacing: CGFloat = 12
+
+    private func sizes(_ subviews: Subviews) -> (side: CGFloat, center: CGSize, all: [CGSize]) {
+        let all = subviews.map { $0.sizeThatFits(.unspecified) }
+        guard all.count == 3 else { return (0, .zero, all) }
+        return (max(all[0].width, all[2].width), all[1], all)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let s = sizes(subviews)
+        let needed = 2 * s.side + s.center.width + 2 * spacing
+        return CGSize(width: max(proposal.width ?? needed, needed), height: s.all.map(\.height).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let s = sizes(subviews)
+        guard s.all.count == 3 else {
+            for v in subviews { v.place(at: bounds.origin, proposal: .unspecified) }
+            return
+        }
+        let left = s.all[0], right = s.all[2]
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY - left.height / 2), proposal: .unspecified)
+        subviews[1].place(at: CGPoint(x: bounds.midX - s.center.width / 2, y: bounds.midY - s.center.height / 2),
+                          proposal: .unspecified)
+        subviews[2].place(at: CGPoint(x: bounds.maxX - right.width, y: bounds.midY - right.height / 2),
+                          proposal: .unspecified)
+    }
+}
+
+/// 複数人モードの映像エリア：全体映像（各人の枠と番号を重ねる）＋人物ごとのタイル。
+/// 人物タイルは見えている番号の最大値まで並べ，いない番号は空きの枠を残す（PersonTiles.personTileCount）。
+/// 並べ方は PersonTiles.grid（4 タイル以下は横 1 列，5〜6 タイルは 2×3）。全体映像が左上，n 人目は n 番目
+private struct PeopleTileGrid: View {
+    let frame: CGImage
+    let boxes: [PersonBox]
+    let tiles: [Int: CGImage]
+    /// ライブのミラー表示。映像と枠の位置だけ反転し，番号の文字は反転しない
+    let mirror: Bool
+    private let spacing = PersonTiles.tileSpacing
+
+    var body: some View {
+        let count = PersonTiles.personTileCount(boxes)
+        let g = PersonTiles.grid(personCount: count)
+        GeometryReader { geo in
+            let cw = max(1, (geo.size.width - spacing * CGFloat(g.columns - 1)) / CGFloat(g.columns))
+            let ch = max(1, (geo.size.height - spacing * CGFloat(g.rows - 1)) / CGFloat(g.rows))
+            ZStack(alignment: .topLeading) {
+                fullView
+                    .frame(width: cw, height: ch)
+                ForEach((0..<count).map { $0 + 1 }, id: \.self) { slot in
+                    let c = PersonTiles.cell(index: slot, personCount: count)
+                    personView(slot: slot, box: boxes.first { $0.slot == slot })
+                        .frame(width: cw, height: ch)
+                        .offset(x: CGFloat(c.column) * (cw + spacing), y: CGFloat(c.row) * (ch + spacing))
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+        }
+    }
+
+    private static func color(_ slot: Int) -> Color { Color(cgColor: Palette.person(slot)) }
+
+    private var fullView: some View {
+        Image(decorative: frame, scale: 1)
+            .resizable()
+            .scaleEffect(x: mirror ? -1 : 1, y: 1)
+            .aspectRatio(CGFloat(frame.width) / CGFloat(max(1, frame.height)), contentMode: .fit)
+            .overlay {
+                GeometryReader { geo in
+                    ForEach(boxes) { b in
+                        let x = mirror ? 1 - b.bbox.maxX : b.bbox.minX
+                        let r = CGRect(x: x * geo.size.width, y: b.bbox.minY * geo.size.height,
+                                       width: b.bbox.width * geo.size.width, height: b.bbox.height * geo.size.height)
+                        Rectangle()
+                            .stroke(Self.color(b.slot), style: StrokeStyle(lineWidth: 2, dash: b.detected ? [] : [6, 4]))
+                            .frame(width: r.width, height: r.height)
+                            .position(x: r.midX, y: r.midY)
+                        badge("\(b.slot)", slot: b.slot)
+                            .position(x: r.minX + 12, y: r.minY + 11)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(cgColor: SkeletonRenderer.sketchBackground))
+    }
+
+    /// n 人目のタイル。その番号の人がいなければ（box が nil）空きの枠に「未検出」と出す
+    private func personView(slot: Int, box: PersonBox?) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color(cgColor: SkeletonRenderer.sketchBackground)
+            if box == nil {
+                Text("未検出").foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let img = tiles[slot] {
+                Image(decorative: img, scale: 1)
+                    .resizable()
+                    .scaleEffect(x: mirror ? -1 : 1, y: 1)
+                    .aspectRatio(CGFloat(img.width) / CGFloat(max(1, img.height)), contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            badge("\(slot)人目", slot: slot).padding(6)
+        }
+        .overlay(Rectangle().stroke(Self.color(slot), lineWidth: 2))
+        .opacity(box?.detected ?? true ? 1 : 0.6)
+    }
+
+    private func badge(_ text: String, slot: Int) -> some View {
+        Text(text)
+            .font(.caption.weight(.bold)).monospacedDigit()
+            .foregroundStyle(.black)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Self.color(slot), in: RoundedRectangle(cornerRadius: 4))
     }
 }

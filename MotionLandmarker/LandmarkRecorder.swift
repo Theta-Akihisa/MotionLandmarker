@@ -6,6 +6,9 @@
 //    results_data/csv/{stem}/{stem}_{face,hand,pose}.csv
 //    results_data/csv/{stem}/{stem}_metrics.csv   （グラフ用の指標．再生時に波形を出すために使う）
 //    results_data/json/{stem}/{stem}_people.json  （複数人モードのみ．全員分のランドマーク．先頭が中央の人物）
+//      各人物エントリは pose / face / left / right に加えて "bbox": [x, y, w, h]（人物の枠．元画像に対する
+//      正規化 0〜1）と "slot": 人物番号（1 始まり．フレームをまたいで同じ人は同じ番号）を持つ（Python 版と共通）．
+//      番号の無い古い録画には無く，再生時は従来の 1 枚表示になる．
 //  複数人モードでも face / hand / pose の CSV / JSON は中央の人物だけ（1 人モードと同じ形式）．
 //    results_data/json/{stem}/{stem}_{face,hand,pose}.json
 //    results_data/video_raw/{stem}_raw.mp4          （生映像）
@@ -281,7 +284,7 @@ nonisolated enum LandmarkJSON {
         pose.append(["frame": frameIndex, "timestamp_ms": frame.timestampMs, "landmarks": p])
     }
 
-    /// 複数人モード：全員分（先頭が中央の人物）を 1 行にまとめる
+    /// 複数人モード：全員分（先頭が中央の人物）を 1 行にまとめる。人物番号と枠があれば "slot" / "bbox" も書く
     static func appendPeople(frameIndex: Int, frame: LandmarkFrame, into rows: inout [[String: Any]]) {
         func person(_ f: LandmarkFrame) -> [String: Any] {
             func xyz(_ lms: [Landmark], count: Int) -> Any {
@@ -290,13 +293,17 @@ nonisolated enum LandmarkJSON {
             }
             let pose: Any = f.pose.count == LandmarkFrame.poseCount
                 ? f.pose.map { ["x": $0.x, "y": $0.y, "z": $0.z, "visibility": $0.visibility] } : NSNull()
-            return ["pose": pose,
-                    "face": xyz(f.face, count: LandmarkFrame.faceCount),
-                    "left": xyz(f.leftHand, count: LandmarkFrame.handCount),
-                    "right": xyz(f.rightHand, count: LandmarkFrame.handCount)]
+            var d: [String: Any] = ["pose": pose,
+                                    "face": xyz(f.face, count: LandmarkFrame.faceCount),
+                                    "left": xyz(f.leftHand, count: LandmarkFrame.handCount),
+                                    "right": xyz(f.rightHand, count: LandmarkFrame.handCount)]
+            if let slot = f.slot, let b = f.bbox {
+                d["bbox"] = [Double(b.minX), Double(b.minY), Double(b.width), Double(b.height)]
+                d["slot"] = slot
+            }
+            return d
         }
-        let detected = frame.pose.count == LandmarkFrame.poseCount
-        let people = (detected ? [frame] : []) + frame.others
+        let people = frame.allPeople
         rows.append(["frame": frameIndex, "timestamp_ms": frame.timestampMs, "people": people.map(person)])
     }
 

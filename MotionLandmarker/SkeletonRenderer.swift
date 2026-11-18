@@ -42,6 +42,16 @@ nonisolated enum Palette {
     static let leftHand = CGColor(red: 0.35, green: 0.9, blue: 0.45, alpha: 1)
     /// 右手
     static let rightHand = CGColor(red: 1.0, green: 0.7, blue: 0.2, alpha: 1)
+
+    /// 複数人モードの人物番号ごとの色（全体映像の枠とタイルの枠・番号で共通）
+    static let people: [CGColor] = [
+        CGColor(red: 1.0, green: 0.85, blue: 0.2, alpha: 1),   // 1 人目
+        CGColor(red: 0.3, green: 0.75, blue: 1.0, alpha: 1),   // 2 人目
+        CGColor(red: 1.0, green: 0.4, blue: 0.7, alpha: 1),    // 3 人目
+        CGColor(red: 0.55, green: 0.95, blue: 0.4, alpha: 1),  // 4 人目
+        CGColor(red: 0.75, green: 0.55, blue: 1.0, alpha: 1),  // 5 人目
+    ]
+    static func person(_ slot: Int) -> CGColor { people[(max(1, slot) - 1) % people.count] }
 }
 
 nonisolated enum SkeletonRenderer {
@@ -143,6 +153,48 @@ nonisolated enum SkeletonRenderer {
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                                       | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
         compose(frame, background: background, in: ctx, size: size, options: options)
+        return ctx.makeImage()
+    }
+
+    /// 人物タイル：元画像の `crop`（画素，左上原点．画像の外にはみ出してよい）を `outputSize` に拡大縮小して切り出し，
+    /// その人のランドマークだけを描く。画像の外の部分は黒。`background` が nil なら sketchBackground の上に描く
+    /// （skeleton 表示）。`person` が nil なら映像だけ。出力の大きさは枠の形によらず `outputSize` で一定
+    static func personTile(_ person: LandmarkFrame?, background: CGImage?, crop: CGRect, fullSize: CGSize,
+                           outputSize: CGSize, options: DrawOptions = .all) -> CGImage? {
+        let w = Int(outputSize.width), h = Int(outputSize.height)
+        guard w > 0, h > 0, crop.width > 0, crop.height > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                      | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        let out = CGRect(x: 0, y: 0, width: w, height: h)
+        let sx = CGFloat(w) / crop.width, sy = CGFloat(h) / crop.height
+        if let background {
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            ctx.fill(out)
+            // 元画像全体を，切り出し範囲が出力いっぱいになる位置・倍率で描く（CoreGraphics は左下原点）
+            ctx.interpolationQuality = .medium
+            ctx.draw(background, in: CGRect(x: -crop.minX * sx, y: CGFloat(h) - (fullSize.height - crop.minY) * sy,
+                                            width: fullSize.width * sx, height: fullSize.height * sy))
+        } else {
+            ctx.setFillColor(sketchBackground)
+            ctx.fill(out)
+        }
+        if let person {
+            // 正規化座標（元画像基準）→ 切り出し範囲基準の正規化座標。線の太さはタイルの大きさで決まる
+            func conv(_ lms: [Landmark]) -> [Landmark] {
+                lms.map { var l = $0
+                    l.x = (l.x * fullSize.width - crop.minX) / crop.width
+                    l.y = (l.y * fullSize.height - crop.minY) / crop.height
+                    return l }
+            }
+            var p = LandmarkFrame.empty(timestampMs: person.timestampMs)
+            p.pose = conv(person.pose); p.face = conv(person.face)
+            p.leftHand = conv(person.leftHand); p.rightHand = conv(person.rightHand)
+            ctx.translateBy(x: 0, y: CGFloat(h))
+            ctx.scaleBy(x: 1, y: -1)
+            draw(p, in: ctx, size: outputSize, options: options)
+        }
         return ctx.makeImage()
     }
 

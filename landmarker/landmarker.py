@@ -10,6 +10,9 @@ Protocol (binary stdin / text stdout):
             "people": [ {同じキー} , ... ]   # 複数人モードのみ．中央の人物を除く他の人物
            }
            pose / face / lh / rh は「画面中央に最も近い人物」（複数人モード）または検出した1人（1人モード）．
+           複数人モードでは各人物（中央の人物は最上位）に次のキーも付く：
+             "id"  : YOLO の追跡 ID（フレームをまたいで同じ人に同じ値．追跡できなかったときは null）
+             "bbox": [x, y, w, h]  YOLO の人物の枠（切り出しの余白を含まない．元画像に対する正規化 0〜1）
   起動時に {"ready": true}，モード切り替え完了時に {"mode": 1|2} を出す．
 
 1人モードは Holistic Landmarker．複数人モードは YOLO（yolo11n）で人物の枠を検出・追跡し，
@@ -32,7 +35,8 @@ MODELS = {
     "holistic_landmarker.task": MODEL_BASE + "holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task",
 }
 # YOLO の重み（yolo11n.pt）は ultralytics が同じ場所へ自動でダウンロードする
-MAX_PEOPLE = 4
+# 複数人モードで検出する最大人数（画面中央に近い順に残す）
+MAX_PEOPLE = 5
 
 MODE_SINGLE = 1
 MODE_MULTI = 2
@@ -137,9 +141,11 @@ class MultiDetector:
         people = []
         if res.boxes is not None and len(res.boxes) > 0:
             boxes = res.boxes.xyxy.cpu().numpy()
-            ids = res.boxes.id.cpu().numpy().astype(int) if res.boxes.id is not None else range(len(boxes))
+            # 追跡 ID が付かなかったフレームは None（番号でごまかすと別人の ID と衝突するため）
+            ids = (res.boxes.id.cpu().numpy().astype(int).tolist() if res.boxes.id is not None
+                   else [None] * len(boxes))
             confs = res.boxes.conf.cpu().numpy()
-            for (x1, y1, x2, y2), tid, conf in zip(boxes, ids, confs):
+            for i, ((x1, y1, x2, y2), tid, conf) in enumerate(zip(boxes, ids, confs)):
                 bh = (y2 - y1) / h
                 if bh < self.MIN_BOX_HEIGHT:
                     continue
@@ -155,7 +161,9 @@ class MultiDetector:
                 rw, rh = max(1, int(round(cw * scale))), max(1, int(round(ch * scale)))
                 canvas = np.zeros((self.CANVAS, self.CANVAS, 3), dtype=np.uint8)
                 canvas[:rh, :rw] = cv2.resize(crop, (rw, rh), interpolation=cv2.INTER_AREA)
-                r = self._holistic(int(tid)).detect_for_video(
+                # 追跡 ID が無い人は枠の順番をキーにする（同じフレーム内で 1 つの Holistic に
+                # 同じ時刻を 2 回渡すと VIDEO モードが落ちるため，人ごとに別のキーにする）
+                r = self._holistic(tid if tid is not None else f"untracked_{i}").detect_for_video(
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=canvas), ts)
                 if not r.pose_landmarks:
                     continue
@@ -177,6 +185,10 @@ class MultiDetector:
                 p["face"] = to_full(r.face_landmarks, False)
                 p["lh"] = to_full(r.left_hand_landmarks, False)
                 p["rh"] = to_full(r.right_hand_landmarks, False)
+                p["id"] = tid
+                p["bbox"] = [float(max(0.0, x1 / w)), float(max(0.0, y1 / h)),
+                             float(min(1.0, x2 / w) - max(0.0, x1 / w)),
+                             float(min(1.0, y2 / h) - max(0.0, y1 / h))]
                 p["_cx"] = (x1 + x2) / 2 / w
                 people.append(p)
         self._drop_stale()

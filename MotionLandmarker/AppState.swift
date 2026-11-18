@@ -9,6 +9,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import Observation
+import QuartzCore
 import UniformTypeIdentifiers
 
 @Observable
@@ -30,7 +31,11 @@ final class AppState {
     var personMode: PersonMode = PersonMode(rawValue: UserDefaults.standard.integer(forKey: "personMode")) ?? .single {
         didSet {
             UserDefaults.standard.set(personMode.rawValue, forKey: "personMode")
-            guard oldValue != personMode, let pipeline else { return }
+            guard oldValue != personMode else { return }
+            // 人物番号は追跡 ID ごとに振り直されるので，表示と人物ごとの履歴を捨てる
+            livePeople = MultiPersonOutput()
+            resetSlotHistories()
+            guard let pipeline else { return }
             isSwitchingPersonMode = true
             pipeline.setPersonMode(personMode.rawValue)
         }
@@ -50,6 +55,32 @@ final class AppState {
     var metricMode: MetricMode = MetricMode(rawValue: UserDefaults.standard.string(forKey: "metricMode") ?? "") ?? .upperBody {
         didSet { UserDefaults.standard.set(metricMode.rawValue, forKey: "metricMode") }
     }
+    /// 複数人モードでグラフに出す人物の番号（1 始まり）。ライブと再生で共通
+    var selectedPerson = 1 {
+        didSet {
+            guard oldValue != selectedPerson else { return }
+            historyDirty = true
+            refreshGraphTimeline()
+        }
+    }
+    /// グラフの人物セレクタに出す番号。複数人モードのライブは 1〜5，再生は録画に出てくる番号。それ以外は空（セレクタを出さない）
+    var personChoices: [Int] {
+        if playbackURL != nil { return playbackPeople?.slots ?? [] }
+        return personMode == .multi ? Array(1...PersonTiles.maxPeople) : []
+    }
+    /// 人物タイルの数 → 表示のマスの縦横比。映像エリアの大きさが変わるたびに画面側から設定し，
+    /// ライブ（パイプライン）と再生の切り出しを合わせ直す
+    var tileAspects: [Int: CGFloat] = [:] {
+        didSet {
+            guard oldValue != tileAspects else { return }
+            pipeline?.setTileAspects(tileAspects)
+            videoOutputNeedsRefresh = true
+        }
+    }
+    /// 一時停止中に縦横比が変わったとき，今のフレームを切り出し直すための印
+    @ObservationIgnored private var videoOutputNeedsRefresh = false
+    /// 複数人モードのライブ表示用（人物の枠とタイル）。displayImage と同じタイミングで更新する
+    var livePeople = MultiPersonOutput()
     /// 非表示にしたグラフと系列（モードをまたいで保持する）
     var hiddenCharts: Set<String> = []
     var hiddenMetrics: Set<MetricKind> = []
@@ -58,6 +89,8 @@ final class AppState {
     var history = MetricHistory(capacity: 600)
     /// 推論フレームごとに更新する履歴（監視対象外）。10 秒分の表示に十分な長さ
     @ObservationIgnored private var liveHistory = MetricHistory(capacity: 600)
+    /// 複数人モード：人物番号ごとの履歴（liveHistory と同じ時刻で揃えて積む．その人がいないフレームは欠損）
+    @ObservationIgnored private var liveSlotHistories: [Int: MetricHistory] = AppState.emptySlotHistories()
     @ObservationIgnored private var historyDirty = false
     @ObservationIgnored private var chartTimer: Timer?
     /// グラフの更新周期（120 Hz）。横軸の右端を現在時刻にして，新しいデータが無くても波形を流す
@@ -78,10 +111,43 @@ final class AppState {
     @ObservationIgnored private var timeObserver: Any?
     /// 再生中の録画の指標時系列（同じ録画の CSV から読む）。無ければ nil
     var playbackTimeline: PlaybackTimeline? {
-        didSet { playbackAllTimes = playbackTimeline?.allTimes ?? [] }
+        didSet { refreshGraphTimeline() }
     }
-    /// playbackTimeline の全フレームの時刻（毎フレーム計算しないようキャッシュ）
+    /// 再生中の録画の人物ごとの枠と指標（{stem}_people.json に人物番号と枠があるときだけ）。
+    /// あれば映像エリアをタイル表示にし，グラフは選んだ人物の指標を出す
+    var playbackPeople: PeopleTrack? {
+        didSet { refreshGraphTimeline() }
+    }
+    /// グラフに出す再生中の時系列：人物番号付きの録画なら選んだ人物の分，それ以外は playbackTimeline
+    private(set) var graphTimeline: PlaybackTimeline?
+    /// graphTimeline の全フレームの時刻（毎フレーム計算しないようキャッシュ）
     private(set) var playbackAllTimes: [Date] = []
+    /// 再生のタイル表示用：動画から取り出した現在のフレームと，その時刻の人物の枠・タイル
+    var playbackFrame: CGImage?
+    var playbackBoxes: [PersonBox] = []
+    var playbackTiles: [Int: CGImage] = [:]
+    @ObservationIgnored private var videoOutput: AVPlayerItemVideoOutput?
+    @ObservationIgnored private var frameTimer: Timer?
+
+    private func refreshGraphTimeline() {
+        if let people = playbackPeople {
+            graphTimeline = people.timelines[selectedPerson]
+        } else {
+            graphTimeline = playbackTimeline
+        }
+        playbackAllTimes = graphTimeline?.allTimes ?? []
+    }
+
+    /// タイル表示の材料（全体映像，人物の枠，人物タイル）。nil なら従来の 1 枚表示。
+    /// 複数人モードのライブ，または人物番号付きの録画の再生（映像の種類が非表示でないとき）
+    var tileSource: (frame: CGImage, boxes: [PersonBox], tiles: [Int: CGImage])? {
+        if playbackURL != nil {
+            guard playbackPeople != nil, playbackVariant != .hidden, let f = playbackFrame else { return nil }
+            return (f, playbackBoxes, playbackTiles)
+        }
+        guard personMode == .multi, liveStyle != .hidden, let img = displayImage else { return nil }
+        return (img, livePeople.boxes, livePeople.tiles)
+    }
     /// 動画の再生位置（秒）
     var playbackSeconds: Double = 0
     /// 動画の長さ（秒）
@@ -145,10 +211,11 @@ final class AppState {
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         if wasPlaying { player.play() }
         currentPlaybackFile = target
+        attachVideoOutput()   // 出力は AVPlayerItem ごとなので付け直す
     }
     /// 実際にプレイヤーに入っているファイル（playbackURL は選択時の URL のまま保つ）
     private(set) var currentPlaybackFile: URL?
-    var playbackHasWaveform: Bool { !(playbackTimeline?.isEmpty ?? true) }
+    var playbackHasWaveform: Bool { !(graphTimeline?.isEmpty ?? true) }
 
     /// 動画ファイルの処理中か
     var isImporting = false
@@ -166,6 +233,8 @@ final class AppState {
         player?.pause()
         player = nil
         playbackTimeline = nil
+        playbackPeople = nil
+        detachVideoOutput()
         playbackSeconds = 0
         guard let url = playbackURL else { return }
         // 同じ録画にある映像の種類を調べ，選んだファイルの種類を初期値にする
@@ -204,12 +273,82 @@ final class AppState {
         Task.detached { [url] in
             let t = PlaybackTimeline.load(forVideo: url)
             await MainActor.run { if self.playbackURL == url { self.playbackTimeline = t } }
+            // 複数人モードの録画なら人物ごとの枠と指標も読む（people.json は大きいことがあるので別スレッドで）
+            let people = PeopleTrack.load(forVideo: url)
+            await MainActor.run {
+                guard self.playbackURL == url, let people else { return }
+                if !people.slots.contains(self.selectedPerson), let first = people.slots.first {
+                    self.selectedPerson = first
+                }
+                self.playbackPeople = people
+                self.attachVideoOutput()
+            }
         }
         timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { time in
             Task { @MainActor in self.playbackSeconds = time.seconds.isFinite ? time.seconds : 0 }
         }
         p.play()
     }
+
+    /// 再生中の動画からフレームを取り出す出力を付ける（タイル表示用）。人物番号付きの録画のときだけ
+    private func attachVideoOutput() {
+        guard playbackPeople != nil, let item = player?.currentItem else { return }
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        ])
+        item.add(output)
+        videoOutput = output
+        if frameTimer == nil {
+            // 一時停止中のシーク・コマ送りでも新しいフレームを拾えるよう，再生状態によらず定期的に見る
+            let t = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in
+                Task { @MainActor in self.pullPlaybackFrame() }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            frameTimer = t
+        }
+    }
+
+    private func detachVideoOutput() {
+        frameTimer?.invalidate()
+        frameTimer = nil
+        videoOutput = nil
+        playbackFrame = nil
+        playbackBoxes = []
+        playbackTiles = [:]
+    }
+
+    /// 新しいフレームがあれば取り出し，その時刻の人物の枠で人物タイルを切り出す。
+    /// 新しいフレームが無くても，マスの縦横比が変わっていれば（一時停止中のウィンドウの大きさ変更など）切り出し直す
+    private func pullPlaybackFrame() {
+        guard let output = videoOutput, let people = playbackPeople, playbackVariant != .hidden else { return }
+        let itemTime = output.itemTime(forHostTime: CACurrentMediaTime())
+        if output.hasNewPixelBuffer(forItemTime: itemTime) {
+            var shown = CMTime.zero
+            guard let pb = output.copyPixelBuffer(forItemTime: itemTime, itemTimeForDisplay: &shown),
+                  let image = FrameEncoder.cgImage(from: pb) else { return }
+            // 枠は表示するフレームの時刻で引く（再生位置の通知を待たずに映像と揃う）
+            let seconds = shown.isValid && shown.seconds.isFinite ? shown.seconds : playbackSeconds
+            playbackFrame = image
+            playbackBoxes = people.boxes(atVideoTime: seconds)
+        } else if !videoOutputNeedsRefresh || playbackFrame == nil {
+            return
+        }
+        videoOutputNeedsRefresh = false
+        guard let image = playbackFrame else { return }
+        var tiles: [Int: CGImage] = [:]
+        let size = CGSize(width: image.width, height: image.height)
+        let aspect = tileAspects[PersonTiles.personTileCount(playbackBoxes)] ?? PersonTiles.defaultAspect
+        for b in playbackBoxes {
+            // 録画の映像（overlay / skeleton / raw）をそのまま切り出す。overlay では近くの人の骨格も写り込む
+            if let r = PersonTiles.cropRect(for: b.bbox, imageSize: size, aspect: aspect),
+               let tile = SkeletonRenderer.personTile(nil, background: image, crop: r, fullSize: size,
+                                                      outputSize: PersonTiles.tileSize(aspect: aspect)) {
+                tiles[b.slot] = tile
+            }
+        }
+        playbackTiles = tiles
+    }
+
     var statusMessage: String?
     /// 推論プロセスが終了したときの標準エラー出力（原因調査用）
     var sidecarExitLog: String = ""
@@ -306,6 +445,7 @@ final class AppState {
         let pipeline = LandmarkPipeline(client: client)
         pipeline.setDrawOptions(drawOptions)
         pipeline.setLiveStyle(liveStyle)
+        pipeline.setTileAspects(tileAspects)
         client.onReady = {
             Task { @MainActor in
                 self.sidecarState = .ready
@@ -328,8 +468,8 @@ final class AppState {
                 self.sidecarState = .failed("推論プロセスが終了しました (code \(code))．「ログ」で詳細を表示")
             }
         }
-        pipeline.onFrame = { image, _, metrics, recorded in
-            Task { @MainActor in self.receive(image: image, metrics: metrics, recorded: recorded) }
+        pipeline.onFrame = { image, _, metrics, people, recorded in
+            Task { @MainActor in self.receive(image: image, metrics: metrics, people: people, recorded: recorded) }
         }
         camera.onFrame = { pb, ms in pipeline.handleCameraFrame(pb, ms) }
         do {
@@ -342,10 +482,20 @@ final class AppState {
         }
     }
 
-    private func receive(image: CGImage?, metrics: [MetricKind: Double], recorded: Int) {
-        if liveStyle != .hidden { displayImage = image }
+    private func receive(image: CGImage?, metrics: [MetricKind: Double], people: MultiPersonOutput, recorded: Int) {
+        if liveStyle != .hidden {
+            displayImage = image
+            livePeople = people
+        }
         recordedFrames = recorded
-        liveHistory.push(metrics)
+        let receivedAt = Date()
+        liveHistory.push(metrics, at: receivedAt)
+        if personMode == .multi {
+            // 全員分を同じ時刻で積む（その人がいないフレームは欠損になる）
+            for slot in 1...PersonTiles.maxPeople {
+                liveSlotHistories[slot, default: MetricHistory(capacity: 600)].push(people.metrics[slot] ?? [:], at: receivedAt)
+            }
+        }
         historyDirty = true
         if chartTimer == nil {
             let t = Timer(timeInterval: Self.chartRefreshInterval, repeats: true) { _ in
@@ -365,7 +515,17 @@ final class AppState {
         chartNow = Date()
         guard historyDirty else { return }
         historyDirty = false
-        history = liveHistory
+        history = personMode == .multi
+            ? liveSlotHistories[selectedPerson, default: MetricHistory(capacity: 600)] : liveHistory
+    }
+
+    private static func emptySlotHistories() -> [Int: MetricHistory] {
+        Dictionary(uniqueKeysWithValues: (1...PersonTiles.maxPeople).map { ($0, MetricHistory(capacity: 600)) })
+    }
+
+    private func resetSlotHistories() {
+        liveSlotHistories = Self.emptySlotHistories()
+        historyDirty = true
     }
 
     // MARK: - 録画

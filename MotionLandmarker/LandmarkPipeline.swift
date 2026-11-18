@@ -12,12 +12,22 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+/// 複数人モードの 1 フレーム分の表示用データ（1 人モードでは空）
+nonisolated struct MultiPersonOutput: Sendable {
+    /// 表示する人物の枠（人物番号順．PersonHold で直前の枠を少し残す）
+    var boxes: [PersonBox] = []
+    /// 人物番号 → 人物タイルの画像（枠で切り出した映像にその人の骨格を現在の表示モードで描いたもの）
+    var tiles: [Int: CGImage] = [:]
+    /// 人物番号 → その人の指標（このフレームにいない人は含まない）
+    var metrics: [Int: [MetricKind: Double]] = [:]
+}
+
 nonisolated final class LandmarkPipeline: @unchecked Sendable {
     /// サイドカーに送る画像の幅（高さはアスペクト比から）。ランドマークは正規化座標なので表示解像度に影響しない。
     static let inferenceWidth = 640
 
-    /// 1 フレームの処理結果：(描画済み画像, フレーム, 指標, 録画済みフレーム数)
-    var onFrame: (@Sendable (CGImage?, LandmarkFrame, [MetricKind: Double], Int) -> Void)?
+    /// 1 フレームの処理結果：(描画済み画像, フレーム, 指標（中央の人物）, 複数人モードの表示用データ, 録画済みフレーム数)
+    var onFrame: (@Sendable (CGImage?, LandmarkFrame, [MetricKind: Double], MultiPersonOutput, Int) -> Void)?
 
     /// 1 フレームの処理が終わるたびに呼ばれる（onFrame の後）。ファイル処理の同期用
     var onProcessed: (@Sendable () -> Void)?
@@ -37,6 +47,15 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
     private var lastWire = -1
     /// true のあいだカメラのフレームを捨てる（動画ファイルの処理中）
     private var cameraPaused = false
+    /// 人数モード（1: 1 人，2: 複数人）。複数人のときだけ人物番号・タイル・人物ごとの指標を作る
+    private var personMode = 1
+    /// 追跡 ID → 人物番号（番号の決め方は PersonSlotAssigner 参照）
+    private var slotAssigner = PersonSlotAssigner()
+    private var personHold = PersonHold()
+    /// 人物番号ごとの直前のフレーム（人物ごとの手首の速度用）
+    private var previousBySlot: [Int: LandmarkFrame] = [:]
+    /// 人物タイルの数 → 表示のマスの縦横比（画面側が映像エリアの大きさから計算して渡す．無ければ既定値）
+    private var tileAspects: [Int: CGFloat] = [:]
 
     init(client: LandmarkerClient) {
         self.client = client
@@ -45,6 +64,7 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
 
     func setDrawOptions(_ o: DrawOptions) { queue.async { self.drawOptions = o } }
     func setLiveStyle(_ st: LiveStyle) { queue.async { self.liveStyle = st } }
+    func setTileAspects(_ a: [Int: CGFloat]) { queue.async { self.tileAspects = a } }
 
     var currentFrameSize: CGSize { queue.sync { frameSize } }
     var isRecording: Bool { queue.sync { recorder != nil } }
@@ -54,7 +74,15 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
         queue.sync {
             cameraPaused = paused
             previousFrame = nil   // 入力源が変わるので速度の基準をリセット
+            resetPeople()         // 追跡 ID も入力源ごとに振り直される
         }
+    }
+
+    /// 人物番号の割り当てと人物ごとの状態を捨てる（queue 上で呼ぶ）
+    private func resetPeople() {
+        slotAssigner.reset()
+        personHold.reset()
+        previousBySlot.removeAll()
     }
 
     /// カメラのスレッドから呼ばれる。推論中なら何もしない（フレームを捨てる）。
@@ -113,10 +141,43 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
             }
             let metrics = MotionMetrics.compute(frame, previous: previousFrame)
             previousFrame = frame
+            let people = personMode == 2 ? numberPeople(&frame, background: background, size: size) : MultiPersonOutput()
             recorder?.append(frame, background: background, metrics: metrics)
-            onFrame?(image, frame, metrics, recorder?.frameCount ?? 0)
+            onFrame?(image, frame, metrics, people, recorder?.frameCount ?? 0)
             onProcessed?()
         }
+    }
+
+    /// 複数人モード：人物番号を割り当てて frame に書き込み（録画の people.json に残る），
+    /// 人物タイルと人物ごとの指標を作る。queue 上で呼ぶ
+    private func numberPeople(_ frame: inout LandmarkFrame, background: CGImage?, size: CGSize) -> MultiPersonOutput {
+        // 中央の人物（検出されていれば）が先頭，続いて others
+        let centerDetected = frame.pose.count == LandmarkFrame.poseCount
+        var people = (centerDetected ? [frame] : []) + frame.others
+        let slots = slotAssigner.assign(people.map { ($0.trackID, $0.bbox) }, timestampMs: frame.timestampMs)
+        for i in people.indices { people[i].slot = slots[i] }
+        if centerDetected { frame.slot = people[0].slot }
+        frame.others = Array(people.dropFirst(centerDetected ? 1 : 0))
+
+        var out = MultiPersonOutput()
+        var bySlot: [Int: LandmarkFrame] = [:]
+        for p in people { if let s = p.slot, p.bbox != nil { bySlot[s] = p } }
+        out.boxes = personHold.update(bySlot.map { ($0.key, $0.value.bbox!) }, timestampMs: frame.timestampMs)
+        for (slot, p) in bySlot {
+            out.metrics[slot] = MotionMetrics.compute(p, previous: previousBySlot[slot])
+            previousBySlot[slot] = p
+        }
+        guard liveStyle != .hidden else { return out }
+        // 切り出しはこのフレームのタイル数での表示のマスと同じ縦横比にし，画像の大きさを一定にする
+        let aspect = tileAspects[PersonTiles.personTileCount(out.boxes)] ?? PersonTiles.defaultAspect
+        for box in out.boxes {
+            guard let crop = PersonTiles.cropRect(for: box.bbox, imageSize: size, aspect: aspect) else { continue }
+            out.tiles[box.slot] = SkeletonRenderer.personTile(
+                liveStyle.showsLandmarks ? bySlot[box.slot] : nil,
+                background: liveStyle.showsCamera ? background : nil,
+                crop: crop, fullSize: size, outputSize: PersonTiles.tileSize(aspect: aspect), options: drawOptions)
+        }
+        return out
     }
 
     func startRecording(outputRoot: URL, stem: String, multiPerson: Bool = false) throws {
@@ -141,7 +202,11 @@ nonisolated final class LandmarkPipeline: @unchecked Sendable {
             waitUntilIdle()
             var tries = 0
             while !client.sendControl(mode: mode), tries < 200 { usleep(5000); tries += 1 }
-            queue.async { self.previousFrame = nil }
+            queue.async {
+                self.previousFrame = nil
+                self.personMode = mode
+                self.resetPeople()
+            }
         }
     }
 

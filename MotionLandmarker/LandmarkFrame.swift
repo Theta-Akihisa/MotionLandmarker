@@ -5,6 +5,7 @@
 //  MediaPipe Holistic の推論結果（1フレーム分）。座標は画像幅・高さで正規化された [0,1] 値。
 //
 
+import CoreGraphics
 import Foundation
 
 nonisolated struct Landmark: Sendable {
@@ -28,6 +29,12 @@ nonisolated struct LandmarkFrame: Sendable {
     var rightHand: [Landmark]   // 21 点 or 空（本人の右手）
     /// 複数人モードで検出した，中央の人物以外の人物（1 人モードでは空）
     var others: [LandmarkFrame] = []
+    /// 複数人モード：サイドカーの追跡 ID（追跡できなかったときは nil）
+    var trackID: Int?
+    /// 複数人モード：人物の枠（元画像に対する正規化 x, y, w, h）。1 人モードでは nil
+    var bbox: CGRect?
+    /// 複数人モード：画面に出す人物番号（1 始まり）。LandmarkPipeline が PersonSlotAssigner で割り当てる
+    var slot: Int?
 
     static let poseCount = 33
     static let faceCount = 478
@@ -54,6 +61,8 @@ nonisolated struct LandmarkFrame: Sendable {
         face = Self.parse(obj["face"])
         leftHand = Self.parse(obj["lh"])
         rightHand = Self.parse(obj["rh"])
+        trackID = obj["id"] as? Int
+        bbox = Self.parseBox(obj["bbox"])
         if let people = obj["people"] as? [[String: Any]] {
             others = people.map { LandmarkFrame(timestampMs: t, dict: $0) }
         }
@@ -66,6 +75,20 @@ nonisolated struct LandmarkFrame: Sendable {
         face = Self.parse(obj["face"])
         leftHand = Self.parse(obj["lh"])
         rightHand = Self.parse(obj["rh"])
+        trackID = obj["id"] as? Int
+        bbox = Self.parseBox(obj["bbox"])
+    }
+
+    /// 中央の人物（検出されていれば）と他の人物をまとめて返す
+    var allPeople: [LandmarkFrame] {
+        (pose.count == Self.poseCount ? [self] : []) + others
+    }
+
+    /// [x, y, w, h]（正規化）→ CGRect。形が違えば nil
+    static func parseBox(_ value: Any?) -> CGRect? {
+        guard let v = value as? [NSNumber], v.count == 4 else { return nil }
+        let r = CGRect(x: v[0].doubleValue, y: v[1].doubleValue, width: v[2].doubleValue, height: v[3].doubleValue)
+        return r.width > 0 && r.height > 0 ? r : nil
     }
 
     private static func parse(_ value: Any?) -> [Landmark] {

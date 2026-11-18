@@ -18,6 +18,10 @@ struct MotionLandmarkerApp: App {
         if CommandLine.arguments.contains("--check") {
             exit(SelfCheck.run(arguments: CommandLine.arguments))
         }
+        // `--selftest` は純粋なロジック（タイルの並べ方・人物番号の割り当てなど）だけを確かめて終了する
+        if CommandLine.arguments.contains("--selftest") {
+            exit(SelfCheck.runLogicTests(arguments: CommandLine.arguments))
+        }
         if CommandLine.arguments.contains("--import") {
             exit(SelfCheck.runImport(arguments: CommandLine.arguments))
         }
